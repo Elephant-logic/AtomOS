@@ -124,7 +124,7 @@ async function buildApp(prompt) {
         format: {
           type: 'json_schema',
           name: 'atomos_application',
-          strict: true,
+          strict: false,
           schema: APP_SCHEMA
         }
       }
@@ -144,18 +144,25 @@ async function buildApp(prompt) {
 }
 
 function validateReferences(app) {
-  const stateKeys = new Set(Object.keys(app.state || {}));
+  if (!app || typeof app !== 'object' || Array.isArray(app)) throw new Error('The model returned an invalid application object');
+  if (!app.state || typeof app.state !== 'object' || Array.isArray(app.state)) throw new Error('Application state is missing');
+  if (!Array.isArray(app.components) || app.components.length === 0) throw new Error('Application components are missing');
+  if (!Array.isArray(app.rules)) throw new Error('Application rules are missing');
+
+  const stateKeys = new Set(Object.keys(app.state));
   const componentIds = new Set();
   const events = new Set();
-  for (const component of app.components || []) {
+  for (const component of app.components) {
+    if (!component.id || !component.type) throw new Error('Every component needs an id and type');
     if (componentIds.has(component.id)) throw new Error(`Duplicate component id: ${component.id}`);
     componentIds.add(component.id);
     if (component.bind && !stateKeys.has(component.bind)) throw new Error(`Unknown binding: ${component.bind}`);
     if (component.event) events.add(component.event);
   }
-  for (const rule of app.rules || []) {
+  for (const rule of app.rules) {
+    if (!rule.event || !Array.isArray(rule.actions)) throw new Error('Every rule needs an event and actions');
     if (!events.has(rule.event)) throw new Error(`Rule has no matching visible control: ${rule.event}`);
-    for (const action of rule.actions || []) {
+    for (const action of rule.actions) {
       if (!stateKeys.has(action.target)) throw new Error(`Unknown action target: ${action.target}`);
       if (action.from && !stateKeys.has(action.from)) throw new Error(`Unknown action source: ${action.from}`);
     }
