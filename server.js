@@ -29,6 +29,18 @@ const APP_SCHEMA = {
         }
       }
     },
+    timers: {
+      type: 'array', maxItems: 12,
+      items: {
+        type: 'object', additionalProperties: false, required: ['id', 'event', 'everyMs'],
+        properties: {
+          id: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,39}$' },
+          event: { type: 'string', maxLength: 40 },
+          everyMs: { type: 'number', minimum: 50, maximum: 86400000 },
+          enabledWhen: { type: 'string', maxLength: 40 }
+        }
+      }
+    },
     rules: {
       type: 'array', maxItems: 160,
       items: {
@@ -72,11 +84,30 @@ function extractOutputText(response) {
   return '';
 }
 
+function normalizeApplication(app) {
+  app.timers = Array.isArray(app.timers) ? app.timers : [];
+  const buttons = new Map();
+  for (const component of app.components || []) {
+    if (component.type !== 'button') continue;
+    if (!component.event) component.event = `${component.id}.click`;
+    buttons.set(component.id, component);
+  }
+  const visibleEvents = new Set([...buttons.values()].map(button => button.event));
+  for (const rule of app.rules || []) {
+    if (visibleEvents.has(rule.event)) continue;
+    const buttonId = String(rule.event || '').replace(/\.(click|press|tap)$/i, '');
+    const button = buttons.get(buttonId);
+    if (button) rule.event = button.event;
+  }
+  return app;
+}
+
 function validateReferences(app) {
   if (!app || typeof app !== 'object' || Array.isArray(app)) throw new Error('The model returned an invalid application object');
   if (!app.state || typeof app.state !== 'object' || Array.isArray(app.state)) throw new Error('Application state is missing');
   if (!Array.isArray(app.components) || app.components.length === 0) throw new Error('Application components are missing');
   if (!Array.isArray(app.rules)) throw new Error('Application rules are missing');
+  if (!Array.isArray(app.timers)) app.timers = [];
   const stateKeys = new Set(Object.keys(app.state));
   const componentIds = new Set();
   const events = new Set();
@@ -87,9 +118,14 @@ function validateReferences(app) {
     if (component.bind && !stateKeys.has(component.bind)) throw new Error(`Unknown binding: ${component.bind}`);
     if (component.event) events.add(component.event);
   }
+  for (const timer of app.timers) {
+    if (!timer.id || !timer.event || !Number.isFinite(Number(timer.everyMs))) throw new Error('Every timer needs id, event and everyMs');
+    if (timer.enabledWhen && !stateKeys.has(timer.enabledWhen)) throw new Error(`Unknown timer state key: ${timer.enabledWhen}`);
+    events.add(timer.event);
+  }
   for (const rule of app.rules) {
     if (!rule.event || !Array.isArray(rule.actions)) throw new Error('Every rule needs an event and actions');
-    if (!events.has(rule.event)) throw new Error(`Rule has no matching visible control: ${rule.event}`);
+    if (!events.has(rule.event)) throw new Error(`Rule has no matching visible control or timer: ${rule.event}`);
     for (const action of rule.actions) {
       if (!stateKeys.has(action.target)) throw new Error(`Unknown action target: ${action.target}`);
       if (action.from && !stateKeys.has(action.from)) throw new Error(`Unknown action source: ${action.from}`);
@@ -105,9 +141,10 @@ async function buildApp(prompt, currentApp) {
   const input = editing ? `CURRENT APPLICATION:\n${JSON.stringify(currentApp)}\n\nCHANGE REQUEST:\n${prompt}` : prompt;
   const instructions = [
     'You are the AtomOS application architect.',
-    editing ? 'Revise the supplied application. Preserve every unrelated working component, state key and rule. Return the complete revised application.' : 'Turn the request into one complete small interactive application.',
+    editing ? 'Revise the supplied application. Preserve every unrelated working component, state key, timer and rule. Return the complete revised application.' : 'Turn the request into one complete small interactive application.',
     'Use only the supplied declarative schema. Never emit JavaScript, HTML, markdown, or prose.',
-    'Every button event must have a matching rule. Every bind and action target must name a state key.',
+    'Every button event must exactly match a rule event. Every bind and action target must name a state key.',
+    'For automatic time-based behaviour, add a timer with id, event, everyMs and optional enabledWhen state key. A stopwatch should use running=false, elapsed=0, a 1000ms timer enabledWhen running, and a tick rule that increments elapsed.',
     'Keep component ids stable during edits unless the component is explicitly removed.',
     'For calculators, keep an expression string and use calculate to place its numeric result into the target.',
     'Make mobile-friendly apps with clear labels and useful initial state.'
@@ -121,7 +158,7 @@ async function buildApp(prompt, currentApp) {
   if (!response.ok) throw new Error(payload?.error?.message || `OpenAI request failed (${response.status})`);
   const text = extractOutputText(payload);
   if (!text) throw new Error('The model returned no application');
-  const app = JSON.parse(text);
+  const app = normalizeApplication(JSON.parse(text));
   validateReferences(app);
   return { app, model, responseId: payload.id, mode: editing ? 'edit' : 'build' };
 }
@@ -135,7 +172,7 @@ function serveStatic(req, res) {
     if (error) return send(res, 404, 'Not found', 'text/plain');
     const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
     if (rel === 'index.html') {
-      const html = data.toString('utf8').replace('</body>', '<script src="/pwa-export.js"></script></body>');
+      const html = data.toString('utf8').replace('</body>', '<script src="/pwa-export.js"></script><script src="/timer-runtime.js"></script></body>');
       return send(res, 200, html, 'text/html; charset=utf-8');
     }
     send(res, 200, data, types[path.extname(filePath)] || 'application/octet-stream');
