@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const MAX_BODY = 100_000;
+const MAX_BODY = 250_000;
 
 const APP_SCHEMA = {
   type: 'object',
@@ -15,44 +15,33 @@ const APP_SCHEMA = {
   properties: {
     title: { type: 'string', minLength: 1, maxLength: 80 },
     description: { type: 'string', maxLength: 240 },
-    state: {
-      type: 'object',
-      additionalProperties: { type: ['string', 'number', 'boolean'] }
-    },
+    state: { type: 'object', additionalProperties: { type: ['string', 'number', 'boolean'] } },
     components: {
-      type: 'array', minItems: 1, maxItems: 80,
+      type: 'array', minItems: 1, maxItems: 100,
       items: {
-        type: 'object', additionalProperties: false,
-        required: ['id', 'type'],
+        type: 'object', additionalProperties: false, required: ['id', 'type'],
         properties: {
           id: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,39}$' },
           type: { type: 'string', enum: ['heading', 'text', 'display', 'input', 'button', 'spacer'] },
-          text: { type: 'string', maxLength: 120 },
-          label: { type: 'string', maxLength: 40 },
-          bind: { type: 'string', maxLength: 40 },
-          inputType: { type: 'string', enum: ['text', 'number', 'email', 'password'] },
-          event: { type: 'string', maxLength: 40 },
-          variant: { type: 'string', enum: ['primary', 'secondary', 'danger'] }
+          text: { type: 'string', maxLength: 120 }, label: { type: 'string', maxLength: 40 },
+          bind: { type: 'string', maxLength: 40 }, inputType: { type: 'string', enum: ['text', 'number', 'email', 'password'] },
+          event: { type: 'string', maxLength: 40 }, variant: { type: 'string', enum: ['primary', 'secondary', 'danger'] }
         }
       }
     },
     rules: {
-      type: 'array', maxItems: 120,
+      type: 'array', maxItems: 160,
       items: {
-        type: 'object', additionalProperties: false,
-        required: ['event', 'actions'],
+        type: 'object', additionalProperties: false, required: ['event', 'actions'],
         properties: {
           event: { type: 'string', maxLength: 40 },
           actions: {
-            type: 'array', minItems: 1, maxItems: 12,
+            type: 'array', minItems: 1, maxItems: 16,
             items: {
-              type: 'object', additionalProperties: false,
-              required: ['op', 'target'],
+              type: 'object', additionalProperties: false, required: ['op', 'target'],
               properties: {
                 op: { type: 'string', enum: ['set', 'increment', 'decrement', 'append', 'clear', 'calculate'] },
-                target: { type: 'string', maxLength: 40 },
-                value: { type: ['string', 'number', 'boolean'] },
-                from: { type: 'string', maxLength: 40 }
+                target: { type: 'string', maxLength: 40 }, value: { type: ['string', 'number', 'boolean'] }, from: { type: 'string', maxLength: 40 }
               }
             }
           }
@@ -63,25 +52,15 @@ const APP_SCHEMA = {
 };
 
 function send(res, status, body, type = 'application/json; charset=utf-8') {
-  res.writeHead(status, {
-    'content-type': type,
-    'cache-control': type.startsWith('text/html') ? 'no-cache' : 'no-store',
-    'x-content-type-options': 'nosniff'
-  });
-  if (Buffer.isBuffer(body) || body instanceof Uint8Array) {
-    res.end(body);
-    return;
-  }
+  res.writeHead(status, { 'content-type': type, 'cache-control': type.startsWith('text/html') ? 'no-cache' : 'no-store', 'x-content-type-options': 'nosniff' });
+  if (Buffer.isBuffer(body) || body instanceof Uint8Array) return res.end(body);
   res.end(typeof body === 'string' ? body : JSON.stringify(body));
 }
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
-    req.on('data', chunk => {
-      data += chunk;
-      if (data.length > MAX_BODY) reject(new Error('Request too large'));
-    });
+    req.on('data', chunk => { data += chunk; if (data.length > MAX_BODY) reject(new Error('Request too large')); });
     req.on('end', () => resolve(data));
     req.on('error', reject);
   });
@@ -89,58 +68,8 @@ function readBody(req) {
 
 function extractOutputText(response) {
   if (typeof response.output_text === 'string') return response.output_text;
-  for (const item of response.output || []) {
-    for (const part of item.content || []) {
-      if (part.type === 'output_text' && typeof part.text === 'string') return part.text;
-    }
-  }
+  for (const item of response.output || []) for (const part of item.content || []) if (part.type === 'output_text' && typeof part.text === 'string') return part.text;
   return '';
-}
-
-async function buildApp(prompt) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('OPENAI_API_KEY is not configured on Render');
-
-  const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
-  const response = await fetch('https://api.openai.com/v1/responses', {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      model,
-      instructions: [
-        'You are the AtomOS application architect.',
-        'Turn the user request into one complete small interactive application.',
-        'Use only the provided declarative schema. Never emit JavaScript, HTML, markdown, or prose.',
-        'Every button event must have a matching rule.',
-        'Every bind and action target must name a key in state.',
-        'For calculators, keep an expression string and use calculate to place its numeric result into the target.',
-        'Make mobile-friendly apps with clear labels and useful initial state.'
-      ].join(' '),
-      input: prompt,
-      text: {
-        format: {
-          type: 'json_schema',
-          name: 'atomos_application',
-          strict: false,
-          schema: APP_SCHEMA
-        }
-      }
-    })
-  });
-
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(payload?.error?.message || `OpenAI request failed (${response.status})`);
-  }
-
-  const text = extractOutputText(payload);
-  if (!text) throw new Error('The model returned no application');
-  const app = JSON.parse(text);
-  validateReferences(app);
-  return { app, model, responseId: payload.id };
 }
 
 function validateReferences(app) {
@@ -148,7 +77,6 @@ function validateReferences(app) {
   if (!app.state || typeof app.state !== 'object' || Array.isArray(app.state)) throw new Error('Application state is missing');
   if (!Array.isArray(app.components) || app.components.length === 0) throw new Error('Application components are missing');
   if (!Array.isArray(app.rules)) throw new Error('Application rules are missing');
-
   const stateKeys = new Set(Object.keys(app.state));
   const componentIds = new Set();
   const events = new Set();
@@ -169,6 +97,35 @@ function validateReferences(app) {
   }
 }
 
+async function buildApp(prompt, currentApp) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENAI_API_KEY is not configured on Render');
+  const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
+  const editing = currentApp && typeof currentApp === 'object';
+  const input = editing ? `CURRENT APPLICATION:\n${JSON.stringify(currentApp)}\n\nCHANGE REQUEST:\n${prompt}` : prompt;
+  const instructions = [
+    'You are the AtomOS application architect.',
+    editing ? 'Revise the supplied application. Preserve every unrelated working component, state key and rule. Return the complete revised application.' : 'Turn the request into one complete small interactive application.',
+    'Use only the supplied declarative schema. Never emit JavaScript, HTML, markdown, or prose.',
+    'Every button event must have a matching rule. Every bind and action target must name a state key.',
+    'Keep component ids stable during edits unless the component is explicitly removed.',
+    'For calculators, keep an expression string and use calculate to place its numeric result into the target.',
+    'Make mobile-friendly apps with clear labels and useful initial state.'
+  ].join(' ');
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ model, instructions, input, text: { format: { type: 'json_schema', name: 'atomos_application', strict: false, schema: APP_SCHEMA } } })
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload?.error?.message || `OpenAI request failed (${response.status})`);
+  const text = extractOutputText(payload);
+  if (!text) throw new Error('The model returned no application');
+  const app = JSON.parse(text);
+  validateReferences(app);
+  return { app, model, responseId: payload.id, mode: editing ? 'edit' : 'build' };
+}
+
 function serveStatic(req, res) {
   const pathname = new URL(req.url, 'http://localhost').pathname;
   const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
@@ -176,24 +133,19 @@ function serveStatic(req, res) {
   if (!filePath.startsWith(PUBLIC_DIR)) return send(res, 403, 'Forbidden', 'text/plain');
   fs.readFile(filePath, (error, data) => {
     if (error) return send(res, 404, 'Not found', 'text/plain');
-    const ext = path.extname(filePath);
-    const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
-    send(res, 200, data, types[ext] || 'application/octet-stream');
+    const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
+    send(res, 200, data, types[path.extname(filePath)] || 'application/octet-stream');
   });
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'GET' && req.url === '/api/status') {
-    return send(res, 200, { ready: Boolean(process.env.OPENAI_API_KEY), model: process.env.OPENAI_MODEL || 'gpt-5-mini' });
-  }
+  if (req.method === 'GET' && req.url === '/api/status') return send(res, 200, { ready: Boolean(process.env.OPENAI_API_KEY), model: process.env.OPENAI_MODEL || 'gpt-5-mini' });
   if (req.method === 'POST' && req.url === '/api/build') {
     try {
-      const raw = await readBody(req);
-      const body = JSON.parse(raw || '{}');
+      const body = JSON.parse(await readBody(req) || '{}');
       const prompt = String(body.prompt || '').trim();
-      if (prompt.length < 3 || prompt.length > 4000) return send(res, 400, { error: 'Prompt must be between 3 and 4000 characters' });
-      const result = await buildApp(prompt);
-      return send(res, 200, result);
+      if (prompt.length < 3 || prompt.length > 6000) return send(res, 400, { error: 'Prompt must be between 3 and 6000 characters' });
+      return send(res, 200, await buildApp(prompt, body.currentApp));
     } catch (error) {
       console.error(error);
       return send(res, 500, { error: error.message || 'Build failed' });
