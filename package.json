@@ -1,11 +1,12 @@
 {
   "name": "atomos",
-  "version": "2.6.0",
-  "description": "Deterministic Atomic runtime with atoms-and-molecules authoring",
+  "version": "2.7.0",
+  "description": "Deterministic Atomic runtime with atoms-and-molecules authoring and secure AI builds",
   "license": "MIT",
   "type": "commonjs",
-  "main": "src/engine.js",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
     "test": "node --test tests/*.test.js",
     "compile:molecule": "node tools/compile-molecule.js"
   },
