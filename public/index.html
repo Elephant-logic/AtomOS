@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Atomic Molecule Calculator</title>
+<style>
+:root{--bg:#0b1220;--panel:#111b2e;--panel2:#17243c;--line:#2a3b59;--text:#e8eef8;--muted:#95a8c5;--accent:#5b8cff;--ok:#42d392;--warn:#f4bd50}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#152849,#0b1220 45%);color:var(--text);font:14px/1.45 Inter,system-ui,sans-serif;min-height:100vh}
+header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;background:#0b1220ee;border-bottom:1px solid var(--line);backdrop-filter:blur(12px)}header h1{font-size:16px;margin:0 12px 0 0}
+button{font:inherit}.tab{border:1px solid var(--line);background:var(--panel);color:var(--text);padding:7px 11px;border-radius:8px;cursor:pointer}.tab.active{background:var(--accent);border-color:var(--accent)}
+main{max-width:1200px;margin:auto;padding:18px}.view{display:none}.view.active{display:block}.card{background:linear-gradient(180deg,var(--panel),#0f192a);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 20px 50px #0003}.grid2{display:grid;grid-template-columns:1.1fr .9fr;gap:16px}@media(max-width:800px){.grid2{grid-template-columns:1fr}.graph{min-height:760px}.node{position:relative!important;left:auto!important;top:auto!important;margin:12px 0}.line{display:none}}
+h2{font-size:15px;margin:0 0 12px}h3{font-size:13px;margin:8px 0;color:var(--muted)}.graph{min-height:520px;position:relative;overflow:hidden}.node{position:absolute;width:180px;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 10px 30px #0005}.node strong{display:block;margin-bottom:7px}.port{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;color:var(--muted)}.dot{width:10px;height:10px;border-radius:50%;background:var(--accent);display:inline-block;box-shadow:0 0 0 3px #5b8cff33}.line{position:absolute;height:3px;background:linear-gradient(90deg,var(--accent),var(--ok));transform-origin:left center;border-radius:99px;opacity:.85}.caption{color:var(--muted);font-size:12px}
+.atom-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}.atom{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:12px}.atom .io{font-size:12px;color:var(--muted);margin-top:8px}.badge{display:inline-block;border:1px solid var(--ok);color:var(--ok);border-radius:99px;padding:2px 8px;font-size:11px}
+.calc{width:min(100%,380px);margin:auto;padding:18px;border-radius:22px;background:#0e1727;border:1px solid var(--line);box-shadow:0 24px 70px #0008}.display{background:#070d18;border:1px solid #253650;border-radius:16px;padding:16px;text-align:right;margin-bottom:14px;min-height:96px}.expr{color:var(--muted);min-height:22px;overflow-wrap:anywhere}.result{font-size:40px;font-weight:750;overflow-wrap:anywhere}.keys{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.key{min-height:58px;border:0;border-radius:14px;background:#1d2b44;color:white;font-size:18px;font-weight:700;cursor:pointer}.key:active{transform:scale(.96)}.op{background:#315fcb}.eq{background:#179a67;grid-column:span 2}.wide{grid-column:span 2}.util{background:#48566b}
+.activity{margin-top:14px;font:12px/1.6 ui-monospace,monospace;background:#0a1220;border:1px solid var(--line);border-radius:12px;padding:10px;min-height:110px;max-height:300px;overflow:auto}.log-ok{color:var(--ok)}.log-event{color:var(--warn)}.log-rule{color:#82aaff}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.smallbtn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:8px;padding:7px 10px;cursor:pointer}.callout{border-left:4px solid var(--accent);background:#12203a;padding:12px 14px;border-radius:8px;margin:12px 0}pre{white-space:pre-wrap;word-break:break-word;background:#07101d;border:1px solid var(--line);border-radius:14px;padding:14px;max-height:620px;overflow:auto;color:#d9e7ff}
+</style>
+</head>
+<body>
+<header><h1>AtomOS Molecular Studio Demo</h1><button class="tab active" data-view="molecule">Molecule</button><button class="tab" data-view="atoms">Atoms</button><button class="tab" data-view="preview">Playable Preview</button><button class="tab" data-view="compiled">Compiled Atomic</button></header>
+<main>
+<section id="molecule" class="view active"><div class="grid2"><div class="card graph"><h2>Calculator Molecule</h2><div class="caption">A complete reusable feature made by bonding smaller atoms.</div>
+<div class="node" style="left:18px;top:220px"><strong>Keypad Atom</strong><div class="port"><span><i class="dot"></i> digit</span><span>event&lt;string&gt;</span></div><div class="port"><span><i class="dot"></i> operator</span><span>event&lt;string&gt;</span></div><div class="port"><span><i class="dot"></i> equals</span><span>event</span></div><div class="port"><span><i class="dot"></i> clear</span><span>event</span></div></div>
+<div class="node" style="left:250px;top:205px"><strong>Expression Atom</strong><div class="port"><span>append</span><span><i class="dot"></i></span></div><div class="port"><span>setOperator</span><span><i class="dot"></i></span></div><div class="port"><span>evaluate</span><span><i class="dot"></i></span></div><div class="port"><span>value</span><span><i class="dot"></i></span></div></div>
+<div class="node" style="left:490px;top:80px"><strong>Display Atom</strong><div class="port"><span>text</span><span><i class="dot"></i></span></div><div class="port"><span>error</span><span><i class="dot"></i></span></div></div>
+<div class="node" style="left:490px;top:330px"><strong>History Atom</strong><div class="port"><span>addEntry</span><span><i class="dot"></i></span></div><div class="port"><span>items</span><span><i class="dot"></i></span></div></div>
+<div class="line" style="left:198px;top:275px;width:58px"></div><div class="line" style="left:428px;top:230px;width:125px;transform:rotate(-39deg)"></div><div class="line" style="left:428px;top:300px;width:125px;transform:rotate(38deg)"></div></div>
+<div class="card"><h2>Public connectors</h2><div class="callout"><b>Inputs:</b> open, keyboard input, number/operator events</div><div class="callout"><b>Outputs:</b> result, error, history entry, close</div><h3>How it works</h3><p>Buttons emit typed events. The Expression Atom receives them, updates state, and emits a result. The Display and History atoms listen to those outputs.</p><span class="badge">Molecule valid</span></div></div></section>
+<section id="atoms" class="view"><div class="card"><h2>Atoms inside the Calculator Molecule</h2><div class="atom-list"><div class="atom"><strong>Keypad Atom</strong><div class="io">Outputs: digit, operator, decimal, equals, clear</div></div><div class="atom"><strong>Expression Atom</strong><div class="io">Inputs: append, operator, evaluate, clear<br>Outputs: text, result, error</div></div><div class="atom"><strong>Display Atom</strong><div class="io">Input: text<br>Visual: ui.label</div></div><div class="atom"><strong>History Atom</strong><div class="io">Input: result<br>Output: entries[]</div></div><div class="atom"><strong>Number State Atom</strong><div class="io">Inputs: set, reset<br>Outputs: value, changed</div></div><div class="atom"><strong>Operator Atom</strong><div class="io">Input: symbol<br>Output: selected operator</div></div></div></div></section>
+<section id="preview" class="view"><div class="grid2"><div class="card"><h2>Playable calculator</h2><div class="calc"><div class="display"><div id="expr" class="expr"></div><div id="result" class="result">0</div></div><div class="keys" id="keys"><button class="key util" data-action="clear">C</button><button class="key util" data-action="delete">DEL</button><button class="key op" data-value="÷">÷</button><button class="key op" data-value="×">×</button><button class="key" data-value="7">7</button><button class="key" data-value="8">8</button><button class="key" data-value="9">9</button><button class="key op" data-value="-">−</button><button class="key" data-value="4">4</button><button class="key" data-value="5">5</button><button class="key" data-value="6">6</button><button class="key op" data-value="+">+</button><button class="key" data-value="1">1</button><button class="key" data-value="2">2</button><button class="key" data-value="3">3</button><button class="key" data-value=".">.</button><button class="key wide" data-value="0">0</button><button class="key eq" data-action="equals">=</button></div></div></div>
+<div class="card"><h2>Atomic activity</h2><div class="caption">Each tap appears as an external event, then a bond, then a state change.</div><div class="toolbar"><button class="smallbtn" id="demo">Run 2 + 2</button><button class="smallbtn" id="reset">Reset</button></div><div id="activity" class="activity"></div></div></div></section>
+<section id="compiled" class="view"><div class="card"><h2>Compiled Atomic</h2><div class="caption">Example low-level output generated from the molecule bonds.</div><pre>{
+  "atomic": "0.1",
+  "entities": [
+    {"id":"calculator","tags":["stateful"],"properties":{"currentInput":"0","storedValue":0,"operator":""}},
+    {"id":"display","tags":["ui.label"],"properties":{"text":"0"}},
+    {"id":"button2","tags":["ui.button"],"properties":{"label":"2"}}
+  ],
+  "rules": [
+    {
+      "id":"calculator__button2_to_expression",
+      "when":{"event":"ui.click","source":{"id":"button2"}},
+      "then":[{"set":["calculator","currentInput","calculator.currentInput == '0' ? '2' : calculator.currentInput + '2'"]}]
+    },
+    {
+      "id":"calculator__expression_to_display",
+      "when":{"event":"changed:currentInput","source":{"id":"calculator"}},
+      "then":[{"set":["display","text","event.payload.new"]}]
+    }
+  ]
+}</pre></div></section>
+</main>
+<script>
+const tabs=[...document.querySelectorAll('.tab')];tabs.forEach(b=>b.onclick=()=>{tabs.forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===b.dataset.view));});
+let expression='';const exprEl=document.getElementById('expr'),resultEl=document.getElementById('result'),activity=document.getElementById('activity');
+function log(text,cls=''){const d=document.createElement('div');d.className=cls;d.textContent=text;activity.prepend(d)}
+function render(){exprEl.textContent=expression;resultEl.textContent=expression||'0'}
+function emit(source,payload){log('external ui.click source='+source+' payload='+JSON.stringify(payload),'log-event')}
+function append(v,source){emit(source,{value:v});log('bond Keypad.value → Expression.append','log-rule');const last=expression.slice(-1),ops=['+','-','×','÷'];if(ops.includes(v)&&ops.includes(last))expression=expression.slice(0,-1)+v;else if(v==='.'&&expression.split(/[+\-×÷]/).pop().includes('.'))return;else expression+=v;log('changed:currentInput new='+JSON.stringify(expression),'log-ok');log('bond Expression.value → Display.text','log-rule');render()}
+function calculate(){emit('buttonEquals',null);log('bond Keypad.equals → Expression.evaluate','log-rule');if(!expression)return;try{const js=expression.replaceAll('×','*').replaceAll('÷','/');if(!/^[0-9+\-*/.()\s]+$/.test(js))throw new Error();const answer=Function('"use strict";return ('+js+')')();if(!Number.isFinite(answer))throw new Error();const old=expression;expression=String(Number(answer.toFixed(10)));exprEl.textContent=old;resultEl.textContent=expression;log('changed:result new='+expression,'log-ok');log('bond Calculation.result → Display.text','log-rule');log('bond Calculation.result → History.addEntry','log-rule')}catch{resultEl.textContent='Error';expression='';log('changed:error new="Error"','log-ok')}}
+function clearAll(){emit('buttonClear',null);log('bond Keypad.clear → Expression.clear','log-rule');expression='';render();log('changed:currentInput new="0"','log-ok')}
+document.getElementById('keys').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.value)append(b.dataset.value,b.textContent);else if(b.dataset.action==='equals')calculate();else if(b.dataset.action==='clear')clearAll();else if(b.dataset.action==='delete'){expression=expression.slice(0,-1);render()}});document.getElementById('reset').onclick=clearAll;document.getElementById('demo').onclick=()=>{clearAll();const seq=['2','+','2'];let i=0;const t=setInterval(()=>{if(i<seq.length)append(seq[i],seq[i++]);else{clearInterval(t);calculate()}},350)};render();log('Molecule compiled and ready','log-ok');
+</script>
+</body></html>
