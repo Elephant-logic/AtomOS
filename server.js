@@ -68,6 +68,10 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
     'cache-control': type.startsWith('text/html') ? 'no-cache' : 'no-store',
     'x-content-type-options': 'nosniff'
   });
+  if (Buffer.isBuffer(body) || body instanceof Uint8Array) {
+    res.end(body);
+    return;
+  }
   res.end(typeof body === 'string' ? body : JSON.stringify(body));
 }
 
