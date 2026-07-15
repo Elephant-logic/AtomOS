@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: atomos-studio
+    runtime: static
+    buildCommand: npm test
+    staticPublishPath: ./public
+    autoDeployTrigger: commit
