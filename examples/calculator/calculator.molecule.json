@@ -1,0 +1,21 @@
+{
+  "kind": "molecule",
+  "id": "calculator",
+  "description": "Calculator assembled from reusable UI and state atoms.",
+  "atoms": [
+    { "id": "display", "atom": "ui.text-display", "config": { "initial": "0" } },
+    { "id": "zero", "atom": "ui.button", "config": { "label": "0" } },
+    { "id": "one", "atom": "ui.button", "config": { "label": "1" } },
+    { "id": "two", "atom": "ui.button", "config": { "label": "2" } },
+    { "id": "plus", "atom": "ui.button", "config": { "label": "+" } },
+    { "id": "equals", "atom": "ui.button", "config": { "label": "=" } },
+    { "id": "clear", "atom": "ui.button", "config": { "label": "C" } },
+    { "id": "expression", "atom": "state.string", "config": { "initial": "0" } }
+  ],
+  "bonds": [
+    { "id": "render_expression", "from": "expression.changed", "to": "display.setText" }
+  ],
+  "outputs": [
+    { "name": "result", "type": "String", "protocol": "state", "from": "expression.changed" }
+  ]
+}
