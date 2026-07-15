@@ -133,7 +133,11 @@ function serveStatic(req, res) {
   if (!filePath.startsWith(PUBLIC_DIR)) return send(res, 403, 'Forbidden', 'text/plain');
   fs.readFile(filePath, (error, data) => {
     if (error) return send(res, 404, 'Not found', 'text/plain');
-    const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
+    const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
+    if (rel === 'index.html') {
+      const html = data.toString('utf8').replace('</body>', '<script src="/pwa-export.js"></script></body>');
+      return send(res, 200, html, 'text/html; charset=utf-8');
+    }
     send(res, 200, data, types[path.extname(filePath)] || 'application/octet-stream');
   });
 }
