@@ -29,7 +29,7 @@ test('browser runtime executes interval capabilities', () => {
 });
 
 test('browser runtime persists declared state only', () => {
-  assert.match(runtime, /capability\.type === 'storage'/);
+  assert.match(runtime, /capability\.type !== 'storage'/);
   assert.match(runtime, /capability\.stateKeys/);
   assert.match(runtime, /localStorage\.setItem/);
   assert.match(runtime, /localStorage\.getItem/);
