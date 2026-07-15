@@ -1,0 +1,13 @@
+{
+  "kind": "atom",
+  "id": "ui.button",
+  "defaults": { "label": "Button" },
+  "inputs": [],
+  "outputs": [
+    { "name": "clicked", "type": "Click", "protocol": "event", "event": "ui.click", "source": "button" }
+  ],
+  "entities": [
+    { "id": "button", "tags": ["ui.button"], "properties": { "label": "${label}" } }
+  ],
+  "rules": []
+}

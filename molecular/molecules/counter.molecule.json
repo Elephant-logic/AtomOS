@@ -1,0 +1,14 @@
+{
+  "kind": "molecule",
+  "id": "counter",
+  "atoms": [
+    { "id": "increment", "atom": "ui.button", "config": { "label": "+1" } },
+    { "id": "value", "atom": "state.string", "config": { "initial": "0" } },
+    { "id": "display", "atom": "ui.text-display", "config": { "initial": "0" } }
+  ],
+  "bonds": [
+    { "id": "show_value", "from": "value.changed", "to": "display.setText" }
+  ],
+  "inputs": [],
+  "outputs": []
+}

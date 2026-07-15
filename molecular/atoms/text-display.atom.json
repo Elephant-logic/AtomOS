@@ -1,0 +1,13 @@
+{
+  "kind": "atom",
+  "id": "ui.text-display",
+  "defaults": { "initial": "0" },
+  "inputs": [
+    { "name": "setText", "type": "String", "protocol": "value", "target": "display", "property": "text" }
+  ],
+  "outputs": [],
+  "entities": [
+    { "id": "display", "tags": ["ui.label"], "properties": { "text": "${initial}" } }
+  ],
+  "rules": []
+}

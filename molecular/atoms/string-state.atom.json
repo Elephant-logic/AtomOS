@@ -1,0 +1,15 @@
+{
+  "kind": "atom",
+  "id": "state.string",
+  "defaults": { "initial": "" },
+  "inputs": [
+    { "name": "set", "type": "String", "protocol": "value", "target": "state", "property": "value" }
+  ],
+  "outputs": [
+    { "name": "changed", "type": "String", "protocol": "event", "event": "changed:value", "source": "state" }
+  ],
+  "entities": [
+    { "id": "state", "tags": ["stateful"], "properties": { "value": "${initial}" } }
+  ],
+  "rules": []
+}
