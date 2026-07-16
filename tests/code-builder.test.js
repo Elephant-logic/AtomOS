@@ -28,6 +28,26 @@ test('scanPython blocks process execution and dynamic code', () => {
   assert.ok(result.errors.some(message => message.includes('eval')));
 });
 
+test('scanPython rejects undeclared Tkinter Treeview columns', () => {
+  const code = `
+from tkinter import ttk
+columns = ("date", "amount")
+tree = ttk.Treeview(root, columns=("date", "amount"), show="headings")
+tree.set(item, "_id", "123")
+`;
+  const result = scanPython(code);
+  assert.ok(result.errors.some(message => message.includes('hidden _id column is not declared')));
+});
+
+test('scanPython permits record ids stored as Treeview iid', () => {
+  const code = `
+from tkinter import ttk
+tree = ttk.Treeview(root, columns=("date", "amount"), show="headings")
+tree.insert("", "end", iid="record-123", values=("2026-01-01", "12.00"))
+`;
+  assert.deepEqual(scanPython(code).errors, []);
+});
+
 test('Python syntax validation compiles without executing code', async () => {
   const valid = await validatePythonSyntax('def add(a, b):\n    return a + b\n');
   assert.equal(valid.ok, true);
