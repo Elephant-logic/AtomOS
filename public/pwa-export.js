@@ -144,35 +144,36 @@ if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.ser
   }
 
   const hasDOM = typeof document !== 'undefined' && typeof document.createElement === 'function';
-  if (!hasDOM) return;
+  if (hasDOM) {
+    if (typeof renderPublish === 'function') {
+      const originalRenderPublish = renderPublish;
+      renderPublish = function renderPublishWithPwa() {
+        originalRenderPublish();
+        if (!currentApp) return;
+        const grid = document.querySelector('#canvas .export-grid');
+        if (!grid || document.getElementById('pwaExportCard')) return;
+        const card = document.createElement('div');
+        card.id = 'pwaExportCard'; card.className = 'export-card';
+        card.innerHTML = '<h2>Installable Android/Web app</h2><p class="muted">Downloads a complete PWA ZIP with offline support, manifest, icon and service worker. Deploy it over HTTPS, then install it from Chrome.</p>';
+        const button = document.createElement('button');
+        button.className = 'good'; button.textContent = 'Download PWA package';
+        button.onclick = () => downloadPwa(currentApp);
+        card.appendChild(button); grid.prepend(card);
+      };
+    }
 
-  if (typeof renderPublish === 'function') {
-    const originalRenderPublish = renderPublish;
-    renderPublish = function renderPublishWithPwa() {
-      originalRenderPublish();
-      if (!currentApp) return;
-      const grid = document.querySelector('#canvas .export-grid');
-      if (!grid || document.getElementById('pwaExportCard')) return;
-      const card = document.createElement('div');
-      card.id = 'pwaExportCard'; card.className = 'export-card';
-      card.innerHTML = '<h2>Installable Android/Web app</h2><p class="muted">Downloads a complete PWA ZIP with offline support, manifest, icon and service worker. Deploy it over HTTPS, then install it from Chrome.</p>';
-      const button = document.createElement('button');
-      button.className = 'good'; button.textContent = 'Download PWA package';
-      button.onclick = () => downloadPwa(currentApp);
-      card.appendChild(button); grid.prepend(card);
-    };
+    function loadScript(src) {
+      if (document.querySelector(`script[src="${src}"]`)) return;
+      const script = document.createElement('script');
+      script.src = src;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+
+    loadScript('/code-refinery.js');
+    loadScript('/atom-factory.js');
+    loadScript('/semantic-library.js');
+    loadScript('/capability-orchestrator.js');
+    loadScript('/requirements-assistant.js');
   }
-
-  function loadScript(src) {
-    if (document.querySelector(`script[src="${src}"]`)) return;
-    const script = document.createElement('script');
-    script.src = src;
-    script.defer = true;
-    document.head.appendChild(script);
-  }
-
-  loadScript('/code-refinery.js');
-  loadScript('/atom-factory.js');
-  loadScript('/semantic-library.js');
-  loadScript('/capability-orchestrator.js');
 })();
