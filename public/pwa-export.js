@@ -174,4 +174,5 @@ if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.ser
   loadScript('/code-refinery.js');
   loadScript('/atom-factory.js');
   loadScript('/semantic-library.js');
+  loadScript('/capability-orchestrator.js');
 })();
