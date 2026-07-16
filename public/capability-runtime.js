@@ -48,6 +48,28 @@
     }
   }
 
+  function formatTime(value) {
+    const total = Math.max(0, Math.floor(Number(value) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    const pair = number => String(number).padStart(2, '0');
+    return hours > 0 ? `${pair(hours)}:${pair(minutes)}:${pair(seconds)}` : `${pair(minutes)}:${pair(seconds)}`;
+  }
+
+  function applyExtendedActions(event) {
+    let changed = false;
+    for (const rule of currentApp?.rules || []) {
+      if (rule.event !== event) continue;
+      for (const action of rule.actions || []) {
+        if (action.op !== 'format_time') continue;
+        state[action.target] = formatTime(action.from ? state[action.from] : action.value);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   function syncCapabilities() {
     clearIntervals();
     hydrateStorage();
@@ -64,7 +86,9 @@
   const originalRunEvent = runEvent;
   runEvent = function runEventWithCapabilities(event) {
     originalRunEvent(event);
+    const changed = applyExtendedActions(event);
     persistStorage();
+    if (changed) render();
   };
 
   const originalRequest = request;
@@ -74,6 +98,16 @@
     syncCapabilities();
     render();
   };
+
+  if (typeof standalone === 'function') {
+    const originalStandalone = standalone;
+    standalone = function standaloneWithExtendedActions() {
+      const html = originalStandalone();
+      const needle = "else if(a.op==='calculate'){try{state[a.target]=calc(v)}catch{state[a.target]='Error'}}";
+      const replacement = "else if(a.op==='calculate'){try{state[a.target]=calc(v)}catch{state[a.target]='Error'}}else if(a.op==='format_time'){const n=Math.max(0,Math.floor(Number(v)||0)),h=Math.floor(n/3600),m=Math.floor((n%3600)/60),s=n%60,p=x=>String(x).padStart(2,'0');state[a.target]=h>0?p(h)+':'+p(m)+':'+p(s):p(m)+':'+p(s)}";
+      return html.includes(needle) ? html.replace(needle, replacement) : html;
+    };
+  }
 
   window.addEventListener('beforeunload', () => {
     persistStorage();
