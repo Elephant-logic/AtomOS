@@ -35,6 +35,23 @@ const ACTION_TYPES = [
   'length', 'min', 'max', 'round', 'floor', 'ceil', 'emit'
 ];
 
+const ACTION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['op', 'target'],
+  properties: {
+    op: { type: 'string', enum: ACTION_TYPES },
+    target: { type: 'string', maxLength: 40 },
+    value: VALUE_SCHEMA,
+    from: { type: 'string', maxLength: 40 },
+    by: VALUE_SCHEMA,
+    index: { type: 'number' },
+    separator: { type: 'string', maxLength: 20 },
+    event: { type: 'string', maxLength: 40 },
+    when: CONDITION_SCHEMA
+  }
+};
+
 const APP_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -94,23 +111,7 @@ const APP_SCHEMA = {
         type: 'object', additionalProperties: false, required: ['event', 'actions'],
         properties: {
           event: { type: 'string', maxLength: 40 },
-          actions: {
-            type: 'array', minItems: 1, maxItems: 40,
-            items: {
-              type: 'object', additionalProperties: false, required: ['op', 'target'],
-              properties: {
-                op: { type: 'string', enum: ACTION_TYPES },
-                target: { type: 'string', maxLength: 40 },
-                value: VALUE_SCHEMA,
-                from: { type: 'string', maxLength: 40 },
-                by: VALUE_SCHEMA,
-                index: { type: 'number' },
-                separator: { type: 'string', maxLength: 20 },
-                event: { type: 'string', maxLength: 40 },
-                when: CONDITION_SCHEMA
-              }
-            }
-          }
+          actions: { type: 'array', minItems: 1, maxItems: 40, items: ACTION_SCHEMA }
         }
       }
     }
@@ -217,14 +218,16 @@ function validateReferences(app) {
   const stateKeys = new Set(Object.keys(app.state));
   const componentIds = new Set();
   const capabilityIds = new Set();
-  const events = new Set();
+  const entryEvents = new Set();
+  const ruleEvents = new Set();
+  const emittedEvents = new Set();
 
   for (const component of app.components) {
     if (!component.id || !component.type) throw new Error('Every component needs an id and type');
     if (componentIds.has(component.id)) throw new Error(`Duplicate component id: ${component.id}`);
     componentIds.add(component.id);
     if (component.bind && !stateKeys.has(component.bind)) throw new Error(`Unknown binding: ${component.bind}`);
-    if (component.event) events.add(component.event);
+    if (component.event) entryEvents.add(component.event);
   }
 
   for (const capability of app.capabilities) {
@@ -233,28 +236,18 @@ function validateReferences(app) {
     capabilityIds.add(capability.id);
 
     if (capability.type === 'interval') {
-      if (!capability.event || !Number.isFinite(Number(capability.everyMs))) {
-        throw new Error(`Interval capability ${capability.id} needs event and everyMs`);
-      }
-      if (capability.enabledWhen && !stateKeys.has(capability.enabledWhen)) {
-        throw new Error(`Unknown interval state key: ${capability.enabledWhen}`);
-      }
-      events.add(capability.event);
+      if (!capability.event || !Number.isFinite(Number(capability.everyMs))) throw new Error(`Interval capability ${capability.id} needs event and everyMs`);
+      if (capability.enabledWhen && !stateKeys.has(capability.enabledWhen)) throw new Error(`Unknown interval state key: ${capability.enabledWhen}`);
+      entryEvents.add(capability.event);
     } else if (capability.type === 'storage') {
-      if (!Array.isArray(capability.stateKeys) || capability.stateKeys.length === 0) {
-        throw new Error(`Storage capability ${capability.id} needs stateKeys`);
-      }
-      for (const key of capability.stateKeys) {
-        if (!stateKeys.has(key)) throw new Error(`Unknown storage state key: ${key}`);
-      }
+      if (!Array.isArray(capability.stateKeys) || capability.stateKeys.length === 0) throw new Error(`Storage capability ${capability.id} needs stateKeys`);
+      for (const key of capability.stateKeys) if (!stateKeys.has(key)) throw new Error(`Unknown storage state key: ${key}`);
     } else if (capability.type === 'startup') {
       if (!capability.event) throw new Error(`Startup capability ${capability.id} needs event`);
-      events.add(capability.event);
+      entryEvents.add(capability.event);
     } else if (capability.type === 'keyboard') {
-      if (!capability.event || !capability.keyboardKey) {
-        throw new Error(`Keyboard capability ${capability.id} needs event and keyboardKey`);
-      }
-      events.add(capability.event);
+      if (!capability.event || !capability.keyboardKey) throw new Error(`Keyboard capability ${capability.id} needs event and keyboardKey`);
+      entryEvents.add(capability.event);
     } else {
       throw new Error(`Unsupported capability type: ${capability.type}`);
     }
@@ -262,14 +255,28 @@ function validateReferences(app) {
 
   for (const rule of app.rules) {
     if (!rule.event || !Array.isArray(rule.actions)) throw new Error('Every rule needs an event and actions');
-    if (!events.has(rule.event)) throw new Error(`Rule has no matching visible control or capability: ${rule.event}`);
+    if (ruleEvents.has(rule.event)) throw new Error(`Duplicate rule event: ${rule.event}`);
+    ruleEvents.add(rule.event);
 
     for (const action of rule.actions) {
       if (!stateKeys.has(action.target)) throw new Error(`Unknown action target: ${action.target}`);
       if (action.from && !stateKeys.has(action.from)) throw new Error(`Unknown action source: ${action.from}`);
       if (action.when && !stateKeys.has(action.when.state)) throw new Error(`Unknown condition state key: ${action.when.state}`);
       if (action.op === 'format_time' && !action.from) throw new Error('format_time needs a numeric source state key');
-      if (action.op === 'emit' && !action.event) throw new Error('emit needs an event name');
+      if (action.op === 'emit') {
+        if (!action.event) throw new Error('emit needs an event name');
+        emittedEvents.add(action.event);
+      }
+    }
+  }
+
+  for (const event of emittedEvents) {
+    if (!ruleEvents.has(event)) throw new Error(`Emitted event has no matching rule: ${event}`);
+  }
+
+  for (const event of ruleEvents) {
+    if (!entryEvents.has(event) && !emittedEvents.has(event)) {
+      throw new Error(`Rule cannot be reached from a visible control, capability or emitted event: ${event}`);
     }
   }
 }
@@ -296,7 +303,9 @@ async function buildApp(prompt, currentApp) {
     'enabledWhen must be only a boolean state key, never an expression.',
     'Conditions support truthy, falsy, eq, neq, gt, gte, lt, lte, includes and not_includes. They read the state at the start of the event.',
     'General actions include set, add, subtract, multiply, divide, modulo, toggle, concat, list_push, list_pop, list_shift, list_unshift, list_remove, list_set, length, min, max, round, floor, ceil and emit.',
-    'Use from to read another state key. Use value or by for a literal operand. emit triggers another rule event after the current action sequence.',
+    'Use from to read another state key. Use value or by for a literal operand.',
+    'Internal event chains are supported: emit may trigger a rule whose event is not a visible control or capability, but every emitted event must have exactly one matching rule.',
+    'Every emit action still needs a valid existing state key in target because target is required by the action schema; the runtime ignores that target for emit.',
     'Use lists for todos, inventories, score histories and queues. State values may be strings, numbers, booleans or arrays of those primitive values.',
     'Use conditional actions for state machines. Prefer several small rules and emit events when a transition needs multiple stages.',
     'Use format_time from numeric seconds into a display state. Never use calculate for labels, modes, booleans, counters or colon-formatted time.',
@@ -382,6 +391,7 @@ const server = http.createServer(async (req, res) => {
       capabilityTypes: ['interval', 'storage', 'startup', 'keyboard'],
       actionTypes: ACTION_TYPES,
       conditionalActions: true,
+      internalEvents: true,
       listState: true
     });
   }
