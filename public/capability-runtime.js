@@ -67,7 +67,7 @@
   }
   function loadPlatformScripts() {
     if (platformLoading) return platformLoading;
-    const scripts = ['/build-verifier.js','/build-pipeline.js','/requirements-assistant-safe.js','/capability-orchestrator-safe.js','/history-manager-safe.js'];
+    const scripts = ['/ui-runtime.js','/build-verifier.js','/build-pipeline.js','/requirements-assistant-safe.js','/capability-orchestrator-safe.js','/history-manager-safe.js'];
     platformLoading = scripts.reduce((chain, src) => chain.then(() => loadOne(src)), Promise.resolve())
       .catch(error => console.error('AtomOS platform feature failed to load', error));
     return platformLoading;
