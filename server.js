@@ -67,7 +67,7 @@ const APP_SCHEMA = {
             items: {
               type: 'object', additionalProperties: false, required: ['op', 'target'],
               properties: {
-                op: { type: 'string', enum: ['set', 'increment', 'decrement', 'append', 'clear', 'calculate'] },
+                op: { type: 'string', enum: ['set', 'increment', 'decrement', 'append', 'clear', 'calculate', 'format_time'] },
                 target: { type: 'string', maxLength: 40 }, value: { type: ['string', 'number', 'boolean'] }, from: { type: 'string', maxLength: 40 }
               }
             }
@@ -107,18 +107,26 @@ function normalizeApplication(app) {
     }
   }
   delete app.timers;
+
   const buttons = new Map();
   for (const component of app.components || []) {
     if (component.type !== 'button') continue;
     if (!component.event) component.event = `${component.id}.click`;
     buttons.set(component.id, component);
   }
+
   const visibleEvents = new Set([...buttons.values()].map(button => button.event));
   for (const rule of app.rules || []) {
-    if (visibleEvents.has(rule.event)) continue;
-    const buttonId = String(rule.event || '').replace(/\.(click|press|tap)$/i, '');
-    const button = buttons.get(buttonId);
-    if (button) rule.event = button.event;
+    if (!visibleEvents.has(rule.event)) {
+      const buttonId = String(rule.event || '').replace(/\.(click|press|tap)$/i, '');
+      const button = buttons.get(buttonId);
+      if (button) rule.event = button.event;
+    }
+    for (const action of rule.actions || []) {
+      const source = String(action.from || '').toLowerCase();
+      const target = String(action.target || '').toLowerCase();
+      if (action.op === 'calculate' && /(elapsed|seconds|duration|time)/.test(source) && /(display|formatted|time)/.test(target)) action.op = 'format_time';
+    }
   }
   return app;
 }
@@ -129,10 +137,12 @@ function validateReferences(app) {
   if (!Array.isArray(app.components) || app.components.length === 0) throw new Error('Application components are missing');
   if (!Array.isArray(app.rules)) throw new Error('Application rules are missing');
   if (!Array.isArray(app.capabilities)) app.capabilities = [];
+
   const stateKeys = new Set(Object.keys(app.state));
   const componentIds = new Set();
   const capabilityIds = new Set();
   const events = new Set();
+
   for (const component of app.components) {
     if (!component.id || !component.type) throw new Error('Every component needs an id and type');
     if (componentIds.has(component.id)) throw new Error(`Duplicate component id: ${component.id}`);
@@ -140,6 +150,7 @@ function validateReferences(app) {
     if (component.bind && !stateKeys.has(component.bind)) throw new Error(`Unknown binding: ${component.bind}`);
     if (component.event) events.add(component.event);
   }
+
   for (const capability of app.capabilities) {
     if (!capability.id || !capability.type) throw new Error('Every capability needs id and type');
     if (capabilityIds.has(capability.id)) throw new Error(`Duplicate capability id: ${capability.id}`);
@@ -151,16 +162,16 @@ function validateReferences(app) {
     } else if (capability.type === 'storage') {
       if (!Array.isArray(capability.stateKeys) || capability.stateKeys.length === 0) throw new Error(`Storage capability ${capability.id} needs stateKeys`);
       for (const key of capability.stateKeys) if (!stateKeys.has(key)) throw new Error(`Unknown storage state key: ${key}`);
-    } else {
-      throw new Error(`Unsupported capability type: ${capability.type}`);
-    }
+    } else throw new Error(`Unsupported capability type: ${capability.type}`);
   }
+
   for (const rule of app.rules) {
     if (!rule.event || !Array.isArray(rule.actions)) throw new Error('Every rule needs an event and actions');
     if (!events.has(rule.event)) throw new Error(`Rule has no matching visible control or capability: ${rule.event}`);
     for (const action of rule.actions) {
       if (!stateKeys.has(action.target)) throw new Error(`Unknown action target: ${action.target}`);
       if (action.from && !stateKeys.has(action.from)) throw new Error(`Unknown action source: ${action.from}`);
+      if (action.op === 'format_time' && !action.from) throw new Error('format_time needs a numeric source state key');
     }
   }
 }
@@ -178,12 +189,14 @@ async function buildApp(prompt, currentApp) {
     'Every button event must exactly match a rule event. Every bind and action target must name a state key.',
     'You may synthesize reusable capability declarations when ordinary components and rules are insufficient.',
     'Available sandboxed capability types are interval and storage. For interval provide id, event, everyMs and optional enabledWhen. For storage provide id, key and stateKeys. Do not invent unsupported capability types.',
-    'A stopwatch should synthesize an interval capability, use running=false and elapsed=0, and increment elapsed on each interval event.',
+    'Use the format_time action to format elapsed seconds as MM:SS. Never use calculate to create a colon-formatted time string.',
+    'A stopwatch should synthesize an interval capability, use running=false and elapsed=0, increment elapsed on each interval event, and use format_time from elapsed into a display state.',
     'An app that must remember data between visits should synthesize a storage capability listing the state keys to persist.',
     'Keep component ids stable during edits unless the component is explicitly removed.',
     'For calculators, keep an expression string and use calculate to place its numeric result into the target.',
     'Make mobile-friendly apps with clear labels and useful initial state.'
   ].join(' ');
+
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
@@ -215,7 +228,7 @@ function serveStatic(req, res) {
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'GET' && req.url === '/api/status') return send(res, 200, { ready: Boolean(process.env.OPENAI_API_KEY), model: process.env.OPENAI_MODEL || 'gpt-5-mini', capabilityTypes: ['interval', 'storage'] });
+  if (req.method === 'GET' && req.url === '/api/status') return send(res, 200, { ready: Boolean(process.env.OPENAI_API_KEY), model: process.env.OPENAI_MODEL || 'gpt-5-mini', capabilityTypes: ['interval', 'storage'], actionTypes: ['format_time'] });
   if (req.method === 'POST' && req.url === '/api/build') {
     try {
       const body = JSON.parse(await readBody(req) || '{}');
