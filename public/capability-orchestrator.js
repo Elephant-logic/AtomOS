@@ -48,6 +48,102 @@
     return String(value || 'capability').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'capability';
   }
 
+  function eventToken(value) {
+    return String(value || '').toLowerCase().replace(/^(press|click|tap)[_.-]?/, '').replace(/[_.-]?(press|click|tap)$/, '').replace(/[^a-z0-9]+/g, '');
+  }
+
+  function buttonToken(button) {
+    const label = String(button.label ?? button.text ?? '').trim();
+    const symbols = { '+': 'plus', '−': 'minus', '-': 'minus', '×': 'multiply', '*': 'multiply', '÷': 'divide', '/': 'divide', '=': 'equals', 'c': 'clear', 'ac': 'clear', '.': 'decimal' };
+    return symbols[label.toLowerCase()] || eventToken(label) || eventToken(button.id);
+  }
+
+  function calculatorKeys(app) {
+    const keys = Object.keys(app?.state || {});
+    const expression = keys.find(key => /expression|equation|formula|input/i.test(key));
+    const display = keys.find(key => /display|result|output/i.test(key));
+    return { expression, display };
+  }
+
+  function calculatorActions(button, app) {
+    const { expression, display } = calculatorKeys(app);
+    if (!expression || !display) return null;
+    const label = String(button.label ?? button.text ?? '').trim();
+    const lower = label.toLowerCase();
+    const appendMap = { '×': '*', '÷': '/', '−': '-', '+': '+', '-': '-', '*': '*', '/': '/', '.': '.' };
+    if (/^[0-9]$/.test(label) || Object.hasOwn(appendMap, label)) {
+      const value = /^[0-9]$/.test(label) ? label : appendMap[label];
+      return [
+        { op: 'append', target: expression, value },
+        { op: 'set', target: display, from: expression }
+      ];
+    }
+    if (lower === 'c' || lower === 'ac' || /clear|reset/.test(lower)) {
+      return [
+        { op: 'set', target: expression, value: '' },
+        { op: 'set', target: display, value: '0' }
+      ];
+    }
+    if (label === '=' || /equals|calculate/.test(lower)) {
+      return [
+        { op: 'calculate', target: display, from: expression },
+        { op: 'set', target: expression, from: display }
+      ];
+    }
+    return null;
+  }
+
+  function repairButtonWiring(app) {
+    if (!app || !Array.isArray(app.components) || !Array.isArray(app.rules)) return { repaired: 0, missing: [] };
+    const buttons = app.components.filter(component => component.type === 'button');
+    const rules = app.rules;
+    let repaired = 0;
+
+    for (const button of buttons) {
+      if (!button.event) {
+        button.event = `press_${buttonToken(button) || eventToken(button.id) || 'button'}`;
+        repaired++;
+      }
+
+      let rule = rules.find(candidate => candidate.event === button.event);
+      if (!rule) {
+        const wanted = new Set([eventToken(button.event), eventToken(button.id), buttonToken(button)]);
+        rule = rules.find(candidate => wanted.has(eventToken(candidate.event)));
+        if (rule) {
+          rule.event = button.event;
+          repaired++;
+        }
+      }
+
+      if (!rule) {
+        const actions = calculatorActions(button, app);
+        if (actions) {
+          rules.push({ event: button.event, actions });
+          repaired++;
+        }
+      }
+    }
+
+    const validEvents = new Set([
+      ...buttons.map(button => button.event),
+      ...(app.capabilities || []).map(capability => capability.event).filter(Boolean)
+    ]);
+    const orphanRules = rules.filter(rule => !validEvents.has(rule.event));
+    for (const rule of orphanRules) {
+      const match = buttons.find(button => {
+        const tokens = new Set([eventToken(button.event), eventToken(button.id), buttonToken(button)]);
+        return tokens.has(eventToken(rule.event));
+      });
+      if (match) {
+        rule.event = match.event;
+        repaired++;
+      }
+    }
+
+    const wired = new Set(rules.map(rule => rule.event));
+    return { repaired, missing: buttons.filter(button => !wired.has(button.event)).map(button => button.id) };
+  }
+
   function requiredCapabilities(prompt) {
     const required = new Set(['runtime.state', 'runtime.rules']);
     for (const [kind, pattern] of SIGNALS) if (pattern.test(prompt)) required.add(kind);
@@ -89,7 +185,8 @@
       '2. Preserve connector contracts of reused parts.',
       '3. For missing behavior, first synthesize it from supported declarative actions and capabilities.',
       '4. Never invent unrestricted JavaScript, packages, permissions, network access, device access or secrets.',
-      '5. Make the result mobile-friendly and test each visible control through its matching event and rule.',
+      '5. Every visible button must have one matching rule event. For calculators, wire every digit, operator, clear and equals button completely.',
+      '6. Make the result mobile-friendly and test each visible control through its matching event and rule.',
       `Required capabilities: ${plan.required.join(', ')}.`,
       `Resolved providers: ${resolved}.`,
       `Unresolved capability concepts: ${missing}.`,
@@ -157,6 +254,12 @@
         const result = await original(editing);
         const app = (typeof currentApp !== 'undefined' && currentApp) || window.currentApp;
         if (app) {
+          const wiring = repairButtonWiring(app);
+          if (wiring.repaired && typeof render === 'function') render();
+          if (typeof log === 'function') {
+            if (wiring.missing.length) log(`Button wiring incomplete: ${wiring.missing.join(', ')}`, 'bad');
+            else if (wiring.repaired) log(`Repaired ${wiring.repaired} button connection(s).`, 'ok');
+          }
           if (window.AtomFactory?.learnCurrentApp) window.AtomFactory.learnCurrentApp();
           const unresolved = recordReceipt(userPrompt, plan, app);
           if (typeof log === 'function') {
@@ -200,5 +303,5 @@
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
-  window.AtomCapabilityOrchestrator = { planFor, requiredCapabilities, recordReceipt, receipts: () => load(RECEIPT_KEY) };
+  window.AtomCapabilityOrchestrator = { planFor, requiredCapabilities, recordReceipt, repairButtonWiring, receipts: () => load(RECEIPT_KEY) };
 })();
