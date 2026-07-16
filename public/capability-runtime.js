@@ -4,6 +4,7 @@
   let keyboardHandler = null;
   let hydratedApp = null;
   let startupApp = null;
+  let platformLoading = null;
 
   function capabilities() {
     const declared = Array.isArray(currentApp?.capabilities) ? currentApp.capabilities : [];
@@ -56,6 +57,21 @@
     }
     if (startupApp !== currentApp) { startupApp = currentApp; queueMicrotask(() => capabilities().filter(x => x.type === 'startup').forEach(c => execute(c.event))); }
   }
+  function loadOne(src) {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`)) return resolve();
+      const script = document.createElement('script');
+      script.src = src; script.async = false; script.onload = resolve; script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+  function loadPlatformScripts() {
+    if (platformLoading) return platformLoading;
+    const scripts = ['/build-verifier.js','/build-pipeline.js','/requirements-assistant-safe.js','/capability-orchestrator-safe.js','/history-manager-safe.js'];
+    platformLoading = scripts.reduce((chain, src) => chain.then(() => loadOne(src)), Promise.resolve())
+      .catch(error => console.error('AtomOS platform feature failed to load', error));
+    return platformLoading;
+  }
   function install() {
     if (!window.AtomOSRuntime) return false;
     runEvent = execute;
@@ -67,7 +83,7 @@
       if (build) build.onclick = () => request(false); if (edit) edit.onclick = () => request(true);
     }
     syncCapabilities();
-    if (!document.querySelector('script[src="/build-verifier.js"]')) { const s=document.createElement('script'); s.src='/build-verifier.js'; s.defer=true; document.head.appendChild(s); }
+    loadPlatformScripts();
     return true;
   }
   function boot() {
