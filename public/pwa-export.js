@@ -175,5 +175,6 @@ if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.ser
     loadScript('/semantic-library.js');
     loadScript('/capability-orchestrator.js');
     loadScript('/requirements-assistant.js');
+    loadScript('/history-manager.js');
   }
 })();
