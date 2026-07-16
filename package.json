@@ -1,12 +1,12 @@
 {
   "name": "atomos",
-  "version": "2.7.3",
+  "version": "2.8.0-rc.1",
   "description": "Deterministic Atomic runtime with atoms-and-molecules authoring and secure AI builds",
   "license": "MIT",
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
-    "start": "node tools/ensure-sequential-runtime-loader.js && node tools/ensure-verifier-loader.js && node -r ./runtime-patch.js server.js",
+    "start": "node tools/ensure-sequential-runtime-loader.js && node tools/ensure-verifier-loader.js && node tools/ensure-safe-platform-loader.js && node -r ./runtime-patch.js server.js",
     "test": "node --test tests/*.test.js",
     "compile:molecule": "node tools/compile-molecule.js"
   },
