@@ -157,4 +157,9 @@ if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.ser
     button.onclick = () => downloadPwa(currentApp);
     card.appendChild(button); grid.prepend(card);
   };
+
+  const refineryScript = document.createElement('script');
+  refineryScript.src = '/code-refinery.js';
+  refineryScript.defer = true;
+  document.head.appendChild(refineryScript);
 })();
