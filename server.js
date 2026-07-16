@@ -99,6 +99,18 @@ function extractOutputText(response) {
   return '';
 }
 
+function normalizeEnabledWhen(value) {
+  const text = String(value || '').trim();
+  if (!text) return undefined;
+  const simple = text.match(/^(?:state\.)?([A-Za-z][A-Za-z0-9_-]{0,39})$/);
+  if (simple) return simple[1];
+  const comparison = text.match(/^\(?\s*(?:state\.)?([A-Za-z][A-Za-z0-9_-]{0,39})\s*(?:===|==|is)\s*true\s*\)?$/i);
+  if (comparison) return comparison[1];
+  const reversed = text.match(/^\(?\s*true\s*(?:===|==|is)\s*(?:state\.)?([A-Za-z][A-Za-z0-9_-]{0,39})\s*\)?$/i);
+  if (reversed) return reversed[1];
+  return text;
+}
+
 function normalizeApplication(app) {
   app.capabilities = Array.isArray(app.capabilities) ? app.capabilities : [];
   if (Array.isArray(app.timers)) {
@@ -107,6 +119,10 @@ function normalizeApplication(app) {
     }
   }
   delete app.timers;
+
+  for (const capability of app.capabilities) {
+    if (capability.type === 'interval' && capability.enabledWhen) capability.enabledWhen = normalizeEnabledWhen(capability.enabledWhen);
+  }
 
   const buttons = new Map();
   for (const component of app.components || []) {
@@ -188,7 +204,7 @@ async function buildApp(prompt, currentApp) {
     'Use only the supplied declarative schema. Never emit JavaScript, HTML, markdown, or prose.',
     'Every button event must exactly match a rule event. Every bind and action target must name a state key.',
     'You may synthesize reusable capability declarations when ordinary components and rules are insufficient.',
-    'Available sandboxed capability types are interval and storage. For interval provide id, event, everyMs and optional enabledWhen. For storage provide id, key and stateKeys. Do not invent unsupported capability types.',
+    'Available sandboxed capability types are interval and storage. For interval provide id, event, everyMs and optional enabledWhen. enabledWhen must be only a boolean state key such as running, never an expression such as running == true. For storage provide id, key and stateKeys. Do not invent unsupported capability types.',
     'Use the format_time action to format elapsed seconds as MM:SS. Never use calculate to create a colon-formatted time string.',
     'A stopwatch should synthesize an interval capability, use running=false and elapsed=0, increment elapsed on each interval event, and use format_time from elapsed into a display state.',
     'An app that must remember data between visits should synthesize a storage capability listing the state keys to persist.',
