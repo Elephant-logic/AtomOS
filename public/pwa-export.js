@@ -2,6 +2,7 @@
   'use strict';
 
   const encoder = new TextEncoder();
+  const hasDOM = typeof document !== 'undefined' && typeof document.createElement === 'function';
   const crcTable = (() => {
     const table = new Uint32Array(256);
     for (let n = 0; n < 256; n++) {
@@ -97,7 +98,7 @@ function component(c){let e;if(c.type==='heading'){e=document.createElement('h2'
 function render(){const shell=document.createElement('div');shell.className='app';const h=document.createElement('h1');h.textContent=app.title||'AtomOS App';const p=document.createElement('p');p.textContent=app.description||'';const grid=document.createElement('div');grid.className='grid';for(const c of app.components||[])grid.appendChild(component(c));shell.append(h,p,grid);root.replaceChildren(shell)}
 render();
 if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.error));
-</script>
+<\/script>
 </body></html>`;
   }
 
@@ -138,28 +139,34 @@ if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.ser
       { name: 'icon.svg', data: iconSvg(app) },
       { name: 'README.md', data: pwaReadme(app) }
     ]);
+    if (!hasDOM) return blob;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = `${name}-pwa.zip`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    return blob;
   }
 
-  const originalRenderPublish = renderPublish;
-  renderPublish = function renderPublishWithPwa() {
-    originalRenderPublish();
-    if (!currentApp) return;
-    const grid = document.querySelector('#canvas .export-grid');
-    if (!grid || document.getElementById('pwaExportCard')) return;
-    const card = document.createElement('div');
-    card.id = 'pwaExportCard'; card.className = 'export-card';
-    card.innerHTML = '<h2>Installable Android/Web app</h2><p class="muted">Downloads a complete PWA ZIP with offline support, manifest, icon and service worker. Deploy it over HTTPS, then install it from Chrome.</p>';
-    const button = document.createElement('button');
-    button.className = 'good'; button.textContent = 'Download PWA package';
-    button.onclick = () => downloadPwa(currentApp);
-    card.appendChild(button); grid.prepend(card);
-  };
+  if (hasDOM && typeof renderPublish === 'function') {
+    const originalRenderPublish = renderPublish;
+    renderPublish = function renderPublishWithPwa() {
+      originalRenderPublish();
+      if (!currentApp) return;
+      const grid = document.querySelector('#canvas .export-grid');
+      if (!grid || document.getElementById('pwaExportCard')) return;
+      const card = document.createElement('div');
+      card.id = 'pwaExportCard'; card.className = 'export-card';
+      card.innerHTML = '<h2>Installable Android/Web app</h2><p class="muted">Downloads a complete PWA ZIP with offline support, manifest, icon and service worker. Deploy it over HTTPS, then install it from Chrome.</p>';
+      const button = document.createElement('button');
+      button.className = 'good'; button.textContent = 'Download PWA package';
+      button.onclick = () => downloadPwa(currentApp);
+      card.appendChild(button); grid.prepend(card);
+    };
+  }
 
-  const refineryScript = document.createElement('script');
-  refineryScript.src = '/code-refinery.js';
-  refineryScript.defer = true;
-  document.head.appendChild(refineryScript);
+  if (hasDOM && document.head && typeof document.head.appendChild === 'function') {
+    const refineryScript = document.createElement('script');
+    refineryScript.src = '/code-refinery.js';
+    refineryScript.defer = true;
+    document.head.appendChild(refineryScript);
+  }
 })();
