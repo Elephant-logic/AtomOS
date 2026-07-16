@@ -30,10 +30,14 @@ test('scanPython blocks process execution, dynamic code and phantom Treeview col
   assert.ok(tree.errors.some(message => message.includes('_id')));
 });
 
-test('browser preview rejects external resources and allows self-contained interaction', () => {
-  assert.equal(scanPreview('<!doctype html><html><body><button onclick="this.textContent=\'OK\'">Go</button></body></html>').ok, true);
-  assert.equal(scanPreview('<!doctype html><html><body><script src="https://example.com/x.js"></script></body></html>').ok, false);
-  assert.equal(scanPreview('<!doctype html><html><script>fetch("https://example.com")</script></html>').ok, false);
+test('browser preview rejects external resources and requires mobile-safe interaction', () => {
+  const valid = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><input type="date"><button onclick="this.textContent=\'OK\'">Go</button></body></html>';
+  assert.equal(scanPreview(valid).ok, true);
+  assert.equal(scanPreview('<!doctype html><html><body><button>Go</button></body></html>').ok, false);
+  assert.equal(scanPreview('<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body><div style="width:900px"></div></body></html>').ok, false);
+  assert.equal(scanPreview('<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body>Date (YYYY-MM-DD)<input></body></html>').ok, false);
+  assert.equal(scanPreview('<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body><script src="https://example.com/x.js"></script></body></html>').ok, false);
+  assert.equal(scanPreview('<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><script>fetch("https://example.com")</script></html>').ok, false);
 });
 
 test('Python syntax validation compiles without executing code', async () => {
