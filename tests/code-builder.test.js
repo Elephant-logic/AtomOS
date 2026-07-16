@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { safeFilename, scanPython, scanPreview, validatePythonSyntax } = require('../src/code-builder');
+const { safeFilename, scanPython, scanPreview, validatePythonSyntax, smokeTestPython } = require('../src/code-builder');
 
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -45,6 +45,29 @@ test('Python syntax validation compiles without executing code', async () => {
   assert.equal(valid.ok, true);
   const invalid = await validatePythonSyntax('def broken(:\n    pass\n');
   assert.equal(invalid.ok, false);
+});
+
+test('headless smoke verification accepts guarded Tkinter desktop apps', async () => {
+  const source = [
+    'import tkinter as tk',
+    'from tkinter import ttk, messagebox, filedialog',
+    'class App(tk.Tk):',
+    '    def __init__(self):',
+    '        super().__init__()',
+    'def main():',
+    '    App().mainloop()',
+    'if __name__ == "__main__":',
+    '    main()'
+  ].join('\n');
+  const result = await smokeTestPython(source);
+  assert.equal(result.ok, true, result.error);
+  assert.match(result.mode, /Tkinter stubs/);
+});
+
+test('headless smoke verification still catches ordinary import failures', async () => {
+  const result = await smokeTestPython('import definitely_missing_atomos_module\n');
+  assert.equal(result.ok, false);
+  assert.match(result.error, /definitely_missing_atomos_module/);
 });
 
 test('server exposes separate declarative and code build APIs', () => {
