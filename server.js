@@ -8,9 +8,19 @@ const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_BODY = 250_000;
 
-const APP_SCHEMA = {
+const CONDITION_SCHEMA = {
   type: 'object',
   additionalProperties: false,
+  required: ['state', 'operator'],
+  properties: {
+    state: { type: 'string', maxLength: 40 },
+    operator: { type: 'string', enum: ['truthy', 'falsy', 'eq', 'neq', 'gt', 'gte', 'lt', 'lte'] },
+    value: { type: ['string', 'number', 'boolean'] }
+  }
+};
+
+const APP_SCHEMA = {
+  type: 'object', additionalProperties: false,
   required: ['title', 'description', 'state', 'components', 'rules'],
   properties: {
     title: { type: 'string', minLength: 1, maxLength: 80 },
@@ -36,10 +46,8 @@ const APP_SCHEMA = {
         properties: {
           id: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,39}$' },
           type: { type: 'string', enum: ['interval', 'storage'] },
-          event: { type: 'string', maxLength: 40 },
-          everyMs: { type: 'number', minimum: 50, maximum: 86400000 },
-          enabledWhen: { type: 'string', maxLength: 40 },
-          key: { type: 'string', maxLength: 80 },
+          event: { type: 'string', maxLength: 40 }, everyMs: { type: 'number', minimum: 50, maximum: 86400000 },
+          enabledWhen: { type: 'string', maxLength: 40 }, key: { type: 'string', maxLength: 80 },
           stateKeys: { type: 'array', maxItems: 40, items: { type: 'string', maxLength: 40 } }
         }
       }
@@ -49,10 +57,8 @@ const APP_SCHEMA = {
       items: {
         type: 'object', additionalProperties: false, required: ['id', 'event', 'everyMs'],
         properties: {
-          id: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,39}$' },
-          event: { type: 'string', maxLength: 40 },
-          everyMs: { type: 'number', minimum: 50, maximum: 86400000 },
-          enabledWhen: { type: 'string', maxLength: 40 }
+          id: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,39}$' }, event: { type: 'string', maxLength: 40 },
+          everyMs: { type: 'number', minimum: 50, maximum: 86400000 }, enabledWhen: { type: 'string', maxLength: 40 }
         }
       }
     },
@@ -63,12 +69,13 @@ const APP_SCHEMA = {
         properties: {
           event: { type: 'string', maxLength: 40 },
           actions: {
-            type: 'array', minItems: 1, maxItems: 16,
+            type: 'array', minItems: 1, maxItems: 24,
             items: {
               type: 'object', additionalProperties: false, required: ['op', 'target'],
               properties: {
                 op: { type: 'string', enum: ['set', 'increment', 'decrement', 'append', 'clear', 'calculate', 'format_time'] },
-                target: { type: 'string', maxLength: 40 }, value: { type: ['string', 'number', 'boolean'] }, from: { type: 'string', maxLength: 40 }
+                target: { type: 'string', maxLength: 40 }, value: { type: ['string', 'number', 'boolean'] },
+                from: { type: 'string', maxLength: 40 }, when: CONDITION_SCHEMA
               }
             }
           }
@@ -113,16 +120,9 @@ function normalizeEnabledWhen(value) {
 
 function normalizeApplication(app) {
   app.capabilities = Array.isArray(app.capabilities) ? app.capabilities : [];
-  if (Array.isArray(app.timers)) {
-    for (const timer of app.timers) {
-      if (!app.capabilities.some(capability => capability.id === timer.id)) app.capabilities.push({ ...timer, type: 'interval' });
-    }
-  }
+  if (Array.isArray(app.timers)) for (const timer of app.timers) if (!app.capabilities.some(capability => capability.id === timer.id)) app.capabilities.push({ ...timer, type: 'interval' });
   delete app.timers;
-
-  for (const capability of app.capabilities) {
-    if (capability.type === 'interval' && capability.enabledWhen) capability.enabledWhen = normalizeEnabledWhen(capability.enabledWhen);
-  }
+  for (const capability of app.capabilities) if (capability.type === 'interval' && capability.enabledWhen) capability.enabledWhen = normalizeEnabledWhen(capability.enabledWhen);
 
   const buttons = new Map();
   for (const component of app.components || []) {
@@ -130,7 +130,6 @@ function normalizeApplication(app) {
     if (!component.event) component.event = `${component.id}.click`;
     buttons.set(component.id, component);
   }
-
   const visibleEvents = new Set([...buttons.values()].map(button => button.event));
   for (const rule of app.rules || []) {
     if (!visibleEvents.has(rule.event)) {
@@ -141,7 +140,7 @@ function normalizeApplication(app) {
     for (const action of rule.actions || []) {
       const source = String(action.from || '').toLowerCase();
       const target = String(action.target || '').toLowerCase();
-      if (action.op === 'calculate' && /(elapsed|seconds|duration|time)/.test(source) && /(display|formatted|time)/.test(target)) action.op = 'format_time';
+      if (action.op === 'calculate' && /(elapsed|seconds|duration|remaining|time)/.test(source) && /(display|formatted|time)/.test(target)) action.op = 'format_time';
     }
   }
   return app;
@@ -187,6 +186,7 @@ function validateReferences(app) {
     for (const action of rule.actions) {
       if (!stateKeys.has(action.target)) throw new Error(`Unknown action target: ${action.target}`);
       if (action.from && !stateKeys.has(action.from)) throw new Error(`Unknown action source: ${action.from}`);
+      if (action.when && !stateKeys.has(action.when.state)) throw new Error(`Unknown condition state key: ${action.when.state}`);
       if (action.op === 'format_time' && !action.from) throw new Error('format_time needs a numeric source state key');
     }
   }
@@ -204,12 +204,15 @@ async function buildApp(prompt, currentApp) {
     'Use only the supplied declarative schema. Never emit JavaScript, HTML, markdown, or prose.',
     'Every button event must exactly match a rule event. Every bind and action target must name a state key.',
     'You may synthesize reusable capability declarations when ordinary components and rules are insufficient.',
-    'Available sandboxed capability types are interval and storage. For interval provide id, event, everyMs and optional enabledWhen. enabledWhen must be only a boolean state key such as running, never an expression such as running == true. For storage provide id, key and stateKeys. Do not invent unsupported capability types.',
-    'Use the format_time action to format elapsed seconds as MM:SS. Never use calculate to create a colon-formatted time string.',
+    'Available sandboxed capability types are interval and storage. For interval provide id, event, everyMs and optional enabledWhen. enabledWhen must be only a boolean state key. For storage provide id, key and stateKeys.',
+    'Actions may include a when condition with a state key and operator truthy, falsy, eq, neq, gt, gte, lt or lte. Conditions are evaluated against the state at the start of the event.',
+    'Use conditional actions for state machines such as Pomodoro timers. On a tick, decrement remaining only when it is greater than zero. When remaining is less than or equal to one, conditionally switch work to break or break to work and set the correct new duration.',
+    'Use format_time from a numeric seconds state into a display state. Never use calculate for labels, modes, booleans, session counters or colon-formatted time.',
     'A stopwatch should synthesize an interval capability, use running=false and elapsed=0, increment elapsed on each interval event, and use format_time from elapsed into a display state.',
+    'A Pomodoro should begin with remaining=1500 and formattedTime="25:00", use 300 seconds for breaks, preserve a string mode such as work or break, and persist progress with storage.',
     'An app that must remember data between visits should synthesize a storage capability listing the state keys to persist.',
     'Keep component ids stable during edits unless the component is explicitly removed.',
-    'For calculators, keep an expression string and use calculate to place its numeric result into the target.',
+    'For calculators, keep an expression string and use calculate only for arithmetic.',
     'Make mobile-friendly apps with clear labels and useful initial state.'
   ].join(' ');
 
@@ -244,7 +247,7 @@ function serveStatic(req, res) {
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'GET' && req.url === '/api/status') return send(res, 200, { ready: Boolean(process.env.OPENAI_API_KEY), model: process.env.OPENAI_MODEL || 'gpt-5-mini', capabilityTypes: ['interval', 'storage'], actionTypes: ['format_time'] });
+  if (req.method === 'GET' && req.url === '/api/status') return send(res, 200, { ready: Boolean(process.env.OPENAI_API_KEY), model: process.env.OPENAI_MODEL || 'gpt-5-mini', capabilityTypes: ['interval', 'storage'], actionTypes: ['format_time'], conditionalActions: true });
   if (req.method === 'POST' && req.url === '/api/build') {
     try {
       const body = JSON.parse(await readBody(req) || '{}');
