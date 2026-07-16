@@ -22,8 +22,10 @@ const BLOCKED_PATTERNS = [
   [/\bos\.system\s*\(/, 'os.system is not allowed'],
   [/\bsubprocess\.(?:Popen|run|call|check_call|check_output)\s*\(/, 'subprocess execution is not allowed'],
   [/\beval\s*\(/, 'eval is not allowed'], [/\bexec\s*\(/, 'exec is not allowed'],
-  [/\b__import__\s*\(/, '__import__ is not allowed'], [/\bsocket\b/, 'raw sockets are not allowed'],
-  [/\bctypes\b/, 'ctypes is not allowed'], [/\bpickle\.(?:loads?|Unpickler)\b/, 'unsafe pickle loading is not allowed'],
+  [/\b__import__\s*\(/, '__import__ is not allowed'],
+  [/^\s*(?:from|import)\s+socket\b/m, 'raw sockets are not allowed'],
+  [/^\s*(?:from|import)\s+ctypes\b/m, 'ctypes is not allowed'],
+  [/\bpickle\.(?:loads?|Unpickler)\b/, 'unsafe pickle loading is not allowed'],
   [/^\s*(?:from|import)\s+(?:requests|urllib|http\.client|ftplib|smtplib)\b/m, 'network client modules are not allowed in the verification worker']
 ];
 
@@ -37,7 +39,27 @@ const PREVIEW_BLOCKED = [
 
 function extractOutputText(response) { if (typeof response.output_text === 'string') return response.output_text; for (const item of response.output || []) for (const part of item.content || []) if (part.type === 'output_text' && typeof part.text === 'string') return part.text; return ''; }
 function safeFilename(value) { const base=String(value||'codem8s_app.py').replace(/\.py$/i,'').replace(/[^A-Za-z0-9_-]+/g,'_').replace(/^_+|_+$/g,'').slice(0,60)||'codem8s_app'; return `${base}.py`; }
-function scanPython(code) { const source=String(code||''),errors=[]; for(const [pattern,message] of BLOCKED_PATTERNS) if(pattern.test(source)) errors.push(message); const dependencies=new Set(); for(const match of source.matchAll(/^\s*(?:from|import)\s+([A-Za-z0-9_.]+)/gm)) dependencies.add(match[1].split('.')[0]); const functions=[...source.matchAll(/^def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm)].map(x=>x[1]); const classes=[...source.matchAll(/^class\s+([A-Za-z_][A-Za-z0-9_]*)\b/gm)].map(x=>x[1]); const declaredColumns=new Set(); for(const m of source.matchAll(/Treeview\([^\n]*columns\s*=\s*\(([^)]*)\)/g)) for(const q of m[1].matchAll(/['\"]([^'\"]+)['\"]/g)) declaredColumns.add(q[1]); for(const m of source.matchAll(/\.set\([^,]+,\s*['\"]([^'\"]+)['\"]/g)) if(!declaredColumns.has(m[1])) errors.push(`Treeview column ${m[1]} is used but not declared`); return {errors:[...new Set(errors)],dependencies:[...dependencies].sort(),functions,classes,lineCount:source.split('\n').length}; }
+function scanPython(code) {
+  const source=String(code||''),errors=[];
+  for(const [pattern,message] of BLOCKED_PATTERNS) if(pattern.test(source)) errors.push(message);
+  const dependencies=new Set();
+  for(const match of source.matchAll(/^\s*(?:from|import)\s+([A-Za-z0-9_.]+)/gm)) dependencies.add(match[1].split('.')[0]);
+  const functions=[...source.matchAll(/^def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm)].map(x=>x[1]);
+  const classes=[...source.matchAll(/^class\s+([A-Za-z_][A-Za-z0-9_]*)\b/gm)].map(x=>x[1]);
+  const columnGroups=new Map();
+  for(const m of source.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[\[(]([^\]\)]*)[\])]/gm)) {
+    const values=[...m[2].matchAll(/['\"]([^'\"]+)['\"]/g)].map(x=>x[1]);
+    if(values.length) columnGroups.set(m[1],values);
+  }
+  const declaredColumns=new Set();
+  for(const m of source.matchAll(/Treeview\([^\n]*columns\s*=\s*([^,\n)]+)/g)) {
+    const expression=m[1].trim();
+    for(const q of expression.matchAll(/['\"]([^'\"]+)['\"]/g)) declaredColumns.add(q[1]);
+    for(const value of columnGroups.get(expression)||[]) declaredColumns.add(value);
+  }
+  for(const m of source.matchAll(/\.set\([^,]+,\s*['\"]([^'\"]+)['\"]/g)) if(declaredColumns.size && !declaredColumns.has(m[1])) errors.push(`Treeview column ${m[1]} is used but not declared`);
+  return {errors:[...new Set(errors)],dependencies:[...dependencies].sort(),functions,classes,lineCount:source.split('\n').length};
+}
 function scanPreview(html) {
   const source = String(html || '');
   const errors = [];
@@ -76,6 +98,25 @@ async function smokeTestPython(code) {
   });
 }
 async function requestCode({apiKey,model,prompt,feedback=''}) { const instructions=['You are Codem8s, the conventional-code builder inside AtomOS.','Create one complete maintainable Python file that fulfils the request.','Also create previewHtml: one complete self-contained HTML document that visually and interactively demonstrates the same application inside AtomOS.','The preview must be mobile-first and responsive: include a viewport meta tag, use max-width:100%, wrapping controls, readable 16px-or-larger inputs, and no fixed desktop widths that overflow a phone.','For date fields, use input type=date where practical. Also accept common typed forms such as YYYY/MM/DD and YYYY.MM.DD by normalizing separators to YYYY-MM-DD before validation. Show validation inline near the field instead of using alert dialogs.','The browser preview must use only inline HTML, CSS and JavaScript, must not use external resources or network access, and its main controls must work with local in-memory data.','The preview is a companion demonstration, not a claim that Python or Tkinter runs in the browser.','Prefer the Python standard library. List every non-standard dependency.','The Python program must have a main entry point guarded by if __name__ == "__main__".','Python date validation should accept YYYY-MM-DD and normalize YYYY/MM/DD or YYYY.MM.DD when a user types them.','For Tkinter Treeview record identity, use the item iid or tags; never call tree.set with an undeclared phantom column.','Do not use os.system, subprocess execution, eval, exec, raw sockets, ctypes, unsafe pickle loading, network clients, credential harvesting or destructive behavior.','Do not embed secrets.','Return structured JSON only.'].join(' '); const input=feedback?`${prompt}\n\nPREVIOUS VALIDATION FAILED:\n${feedback}\nReturn the complete repaired Python program and browser preview.`:prompt; const response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{authorization:`Bearer ${apiKey}`,'content-type':'application/json'},body:JSON.stringify({model,instructions,input,text:{format:{type:'json_schema',name:'atomos_code_app',strict:false,schema:CODE_SCHEMA}}})}); const payload=await response.json(); if(!response.ok) throw Error(payload?.error?.message||`OpenAI request failed (${response.status})`); const text=extractOutputText(payload); if(!text) throw Error('The model returned no code application'); return {artifact:JSON.parse(text),responseId:payload.id}; }
-async function buildCodeApp({apiKey,model='gpt-5-mini',prompt,maxAttempts=3}) { let feedback='',lastArtifact=null; for(let attempt=1;attempt<=maxAttempts;attempt++){ const result=await requestCode({apiKey,model,prompt,feedback}); const artifact=result.artifact; artifact.filename=safeFilename(artifact.filename); const scan=scanPython(artifact.code); const preview=scanPreview(artifact.previewHtml); const syntax=scan.errors.length?{ok:false,error:scan.errors.join('; ')}:await validatePythonSyntax(artifact.code); const sandbox=syntax.ok?await smokeTestPython(artifact.code):{ok:false,error:'Skipped because syntax or policy validation failed',mode:'headless import smoke test'}; lastArtifact={...artifact,responseId:result.responseId,verification:{attempt,scan,syntax,sandbox,preview}}; if(syntax.ok&&scan.errors.length===0&&sandbox.ok&&preview.ok)return lastArtifact; feedback=[syntax.error,...scan.errors,sandbox.error,...preview.errors].filter(Boolean).join('\n'); } const error=new Error(`Codem8s could not produce a validated program: ${lastArtifact?.verification?.sandbox?.error||lastArtifact?.verification?.syntax?.error||lastArtifact?.verification?.preview?.errors?.join('; ')||'unknown validation failure'}`); error.artifact=lastArtifact; throw error; }
+async function buildCodeApp({apiKey,model='gpt-5-mini',prompt,maxAttempts=3}) {
+  let feedback='',lastArtifact=null;
+  for(let attempt=1;attempt<=maxAttempts;attempt++){
+    const result=await requestCode({apiKey,model,prompt,feedback});
+    const artifact=result.artifact;
+    artifact.filename=safeFilename(artifact.filename);
+    const scan=scanPython(artifact.code);
+    const preview=scanPreview(artifact.previewHtml);
+    const syntax=await validatePythonSyntax(artifact.code);
+    const sandbox=syntax.ok&&scan.errors.length===0?await smokeTestPython(artifact.code):{ok:false,error:'Not run because Python validation failed',mode:'headless import smoke test'};
+    lastArtifact={...artifact,responseId:result.responseId,verification:{attempt,scan,syntax,sandbox,preview}};
+    if(syntax.ok&&scan.errors.length===0&&sandbox.ok&&preview.ok)return lastArtifact;
+    feedback=[syntax.error,...scan.errors,sandbox.error,...preview.errors].filter(Boolean).join('\n');
+  }
+  const verification=lastArtifact?.verification||{};
+  const reasons=[verification.syntax?.error,...(verification.scan?.errors||[]),verification.sandbox?.error,...(verification.preview?.errors||[])].filter(Boolean);
+  const error=new Error(`Codem8s could not produce a validated program: ${reasons.join('; ')||'unknown validation failure'}`);
+  error.artifact=lastArtifact;
+  throw error;
+}
 
 module.exports={CODE_SCHEMA,BLOCKED_PATTERNS,PREVIEW_BLOCKED,safeFilename,scanPython,scanPreview,validatePythonSyntax,smokeTestPython,buildCodeApp};
