@@ -6,6 +6,7 @@ const path = require('node:path');
 const { buildCodeApp, scanPython } = require('./src/code-builder');
 const knowledge = require('./src/knowledge/service');
 const { normalizeApplication, validateReferences, buildApp, APP_SCHEMA, ACTION_TYPES } = require('./src/app-platform');
+const { classifyBuildIntent, applyIntentGuard } = require('./src/build-intent');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -45,7 +46,7 @@ function serveStatic(req, res) {
       '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json'
     };
     if (rel === 'index.html') {
-      const scripts = '<script src="/runtime-core.js"></script><script src="/pwa-export.js"></script><script src="/capability-runtime.js"></script><script src="/codem8s-studio.js"></script><script src="/knowledge-studio.js"></script><script src="/game-web-studio.js"></script>';
+      const scripts = '<script src="/runtime-core.js"></script><script src="/pwa-export.js"></script><script src="/capability-runtime.js"></script><script src="/codem8s-studio.js"></script><script src="/knowledge-studio.js"></script><script src="/game-web-studio.js"></script><script src="/build-router.js"></script>';
       return send(res, 200, data.toString('utf8').replace('</body>', `${scripts}</body>`), 'text/html; charset=utf-8');
     }
     send(res, 200, data, types[path.extname(filePath)] || 'application/octet-stream');
@@ -87,14 +88,26 @@ const server = http.createServer(async (req, res) => {
     componentTypes: APP_SCHEMA.properties.components.items.properties.type.enum,
     screens: true, boards: true, groups: true, repeats: true,
     conditionalActions: true, conditionalComponents: true, internalEvents: true, listState: true,
+    intentRouter: true,
     codeBuilder: { languages: ['python'], execution: false, verification: ['blocked-pattern scan', 'python syntax compile', 'repair loop'] }
   });
+  if (req.method === 'POST' && url.pathname === '/api/build-intent') {
+    try {
+      const body = JSON.parse(await readBody(req) || '{}');
+      const prompt = String(body.prompt || '').trim();
+      if (prompt.length < 3 || prompt.length > 12000) return send(res, 400, { error: 'Prompt must be between 3 and 12000 characters' });
+      return send(res, 200, applyIntentGuard(prompt, body.option));
+    } catch (error) { return send(res, 400, { error: error.message || 'Classification failed' }); }
+  }
   if (req.method === 'POST' && url.pathname === '/api/build') {
     try {
       const body = JSON.parse(await readBody(req) || '{}');
       const prompt = String(body.prompt || '').trim();
       if (prompt.length < 3 || prompt.length > 6000) return send(res, 400, { error: 'Prompt must be between 3 and 6000 characters' });
-      return send(res, 200, await buildApp(prompt, body.currentApp));
+      const intent = classifyBuildIntent(prompt);
+      const guardedPrompt = `BUILD PROFILE: ${intent.intent}. ${intent.instructions}\n\nUSER REQUEST:\n${prompt}`;
+      const result = await buildApp(guardedPrompt, body.currentApp);
+      return send(res, 200, { ...result, intent });
     } catch (error) { console.error(error); return send(res, 500, { error: error.message || 'Build failed' }); }
   }
   if (req.method === 'POST' && url.pathname === '/api/code-build') {
@@ -102,8 +115,10 @@ const server = http.createServer(async (req, res) => {
       const body = JSON.parse(await readBody(req) || '{}');
       const prompt = String(body.prompt || '').trim();
       if (prompt.length < 3 || prompt.length > 12000) return send(res, 400, { error: 'Prompt must be between 3 and 12000 characters' });
+      const guard = applyIntentGuard(prompt, 'code');
+      if (guard.mismatch) return send(res, 409, { error: `This looks like a ${guard.intent} request. Use ${guard.label}.`, intent: guard });
       const artifact = await buildCodeApp({ apiKey: process.env.OPENAI_API_KEY, model: process.env.OPENAI_MODEL || 'gpt-5-mini', prompt, maxAttempts: 3 });
-      return send(res, 200, { artifact, mode: 'code', execution: false });
+      return send(res, 200, { artifact, mode: 'code', execution: false, intent: guard });
     } catch (error) { console.error(error); return send(res, 500, { error: error.message || 'Code build failed', artifact: error.artifact || null }); }
   }
   if (req.method === 'POST' && url.pathname === '/api/code-analyze') {
@@ -123,4 +138,4 @@ if (require.main === module) {
   server.listen(PORT, '0.0.0.0', () => console.log(`AtomOS listening on ${PORT}`));
 }
 
-module.exports = { normalizeApplication, validateReferences, buildApp, APP_SCHEMA, ACTION_TYPES, server };
+module.exports = { normalizeApplication, validateReferences, buildApp, APP_SCHEMA, ACTION_TYPES, classifyBuildIntent, applyIntentGuard, server };
