@@ -1,7 +1,7 @@
 {
   "name": "atomos",
-  "version": "2.8.0",
-  "description": "Deterministic Atomic runtime with atoms-and-molecules authoring and secure AI builds",
+  "version": "2.9.0",
+  "description": "Deterministic Atomic runtime with persistent code knowledge and secure AI builds",
   "license": "MIT",
   "type": "commonjs",
   "main": "server.js",
