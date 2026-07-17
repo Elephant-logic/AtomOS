@@ -3,6 +3,7 @@
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
   const STORE = 'atomos-fullstack-project-v1';
+  const MAX_INCREMENTAL_PROMPT = 11500;
   let project = null;
   const $ = id => document.getElementById(id);
   const escapeHtml = value => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
@@ -29,7 +30,7 @@
     const version = (previous?.version || 0) + 1;
     const nodes = analyseArtifact(artifact);
     const edges = [{ from:'browser-app', to:'python-app', connector:'contract:application-data', status:'connected' }];
-    const suggestions = [
+    const suggestions = previous?.suggestions?.length ? previous.suggestions : [
       'Add persistent database storage and migration support',
       'Add an HTTP API contract between the browser and backend',
       'Add authentication and user-specific data',
@@ -38,8 +39,8 @@
     return {
       atomosProjectVersion:'0.1',
       id: previous?.id || `project-${Date.now()}`,
-      title: artifact.title || 'Full-stack project',
-      request: prompt,
+      title: artifact.title || previous?.title || 'Full-stack project',
+      request: previous?.request || prompt,
       version,
       stack:['Browser HTML/CSS/JavaScript','Python'],
       files:[
@@ -67,7 +68,7 @@
     if (!project) return;
     const canvas = $('canvas'); if (!canvas) return;
     const shell = document.createElement('div'); shell.dataset.fullstackProject = 'true';
-    shell.innerHTML = `<div class="library-card"><h2>${escapeHtml(project.title)}</h2><p class="muted">Full-stack project v${project.version} · ${project.files.length} files · ${project.nodes.length} graph nodes · ${project.edges.length} connection(s)</p><div class="row"><button id="fullstackPreview" class="good">Run browser app</button><button id="fullstackGraph">Project graph</button><button id="fullstackFiles">Files</button><button id="fullstackNext">Build suggested next bit</button><button id="fullstackDownload">Download project map</button></div></div><div id="fullstackView"></div>`;
+    shell.innerHTML = `<div class="library-card"><h2>${escapeHtml(project.title)}</h2><p class="muted">Full-stack project v${project.version} · ${project.files.length} files · ${project.nodes.length} graph nodes · ${project.edges.length} connection(s)</p><div class="row"><button id="fullstackPreview" class="good">Run browser app</button><button id="fullstackGraph">Project graph</button><button id="fullstackFiles">Files</button><button id="fullstackNext">Build suggested next bit</button><button id="fullstackDownload">Download project map</button></div><div id="fullstackProgress" class="muted" style="margin-top:8px"></div></div><div id="fullstackView"></div>`;
     canvas.replaceChildren(shell);
 
     const showPreview = () => {
@@ -86,7 +87,7 @@
         graph.appendChild(card);
       }
       host.appendChild(graph);
-      const suggestions = document.createElement('div'); suggestions.className = 'library-card'; suggestions.innerHTML = `<h2>Suggested next pieces</h2><ol>${project.suggestions.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ol>`; host.appendChild(suggestions);
+      const suggestions = document.createElement('div'); suggestions.className = 'library-card'; suggestions.innerHTML = `<h2>Suggested next pieces</h2><p class="muted">The first item is what Continue will build. You can replace it by typing your own next change in the main prompt box.</p><ol>${project.suggestions.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ol>`; host.appendChild(suggestions);
     };
     const showFiles = () => {
       const host = $('fullstackView'); if (!host) return;
@@ -104,7 +105,8 @@
   }
 
   async function requestArtifact(prompt) {
-    const response = await fetch('/api/code-build', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ prompt }) });
+    const clean = String(prompt || '').trim().slice(0, MAX_INCREMENTAL_PROMPT);
+    const response = await fetch('/api/code-build', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ prompt:clean }) });
     const data = await response.json();
     if (!response.ok) throw Error(data.error || 'Full-stack build failed');
     return data.artifact;
@@ -124,16 +126,41 @@
     finally { const live = $('fullstackBuild'); if (live) { live.disabled = false; live.textContent = 'Build full stack'; } mount(); }
   }
 
+  function compactProjectContext() {
+    const nodeSummary = project.nodes.slice(0, 30).map(node => `${node.id} | ${node.kind} | provides:${node.provides.join(',')} | requires:${node.requires.join(',')}`).join('\n');
+    const fileSummary = project.files.map(file => {
+      const content = String(file.content || '');
+      const excerpt = content.length <= 3300 ? content : `${content.slice(0, 2400)}\n... [middle omitted] ...\n${content.slice(-700)}`;
+      return `FILE ${file.path} (${file.language}, ${content.length} chars):\n${excerpt}`;
+    }).join('\n\n');
+    return `PROJECT: ${project.title}\nVERSION: ${project.version}\nORIGINAL REQUEST: ${project.request}\n\nGRAPH NODES:\n${nodeSummary}\n\nCURRENT FILE EXCERPTS:\n${fileSummary}`;
+  }
+
   async function buildNext() {
     if (!project) return;
-    const suggestion = project.suggestions[0] || 'Add the next missing tested capability';
+    const typed = $('prompt')?.value.trim();
+    const suggestion = typed && typed !== project.request ? typed : (project.suggestions[0] || 'Add the next missing tested capability');
+    const button = $('fullstackNext');
+    const progress = $('fullstackProgress');
+    if (button) { button.disabled = true; button.textContent = 'Building next bit…'; }
+    if (progress) progress.textContent = `Working on: ${suggestion}`;
     if (typeof log === 'function') log(`Incremental build: ${suggestion}…`);
     try {
-      const context = project.files.map(file => `FILE ${file.path}:\n${file.content}`).join('\n\n').slice(0, 28000);
-      const artifact = await requestArtifact(`Existing full-stack project:\n${context}\n\nIncremental change: ${suggestion}. Preserve all working behaviour. Return the complete updated Python target and complete updated browser frontend. Keep their contracts aligned.`);
-      project = makeProject(suggestion, artifact, project); project.suggestions = project.suggestions.slice(1).concat('Review the graph and add the next missing vertical feature'); save(); renderProject();
+      const context = compactProjectContext();
+      const incrementalPrompt = `${context}\n\nINCREMENTAL CHANGE:\n${suggestion}\n\nPreserve all existing working behaviour. Return the complete updated Python target and complete updated browser frontend. Keep their contracts aligned. Do not remove unrelated features. Build only this next vertical change.`;
+      const artifact = await requestArtifact(incrementalPrompt);
+      const remaining = project.suggestions.filter(item => item !== suggestion);
+      project = makeProject(suggestion, artifact, project);
+      project.suggestions = [...remaining, 'Review the graph and add the next missing vertical feature'];
+      save(); renderProject();
       if (typeof log === 'function') log(`Project updated to version ${project.version}.`, 'ok');
-    } catch (error) { if (typeof log === 'function') log(error.message, 'bad'); }
+    } catch (error) {
+      if (progress) progress.textContent = `Could not continue: ${error.message}`;
+      if (typeof log === 'function') log(error.message, 'bad');
+    } finally {
+      const live = $('fullstackNext');
+      if (live) { live.disabled = false; live.textContent = 'Build suggested next bit'; }
+    }
   }
 
   function mount() {
