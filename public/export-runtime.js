@@ -11,7 +11,18 @@
 
   function valueOf(action) { return action.from ? state[action.from] : action.value; }
   function activeScreen() { return app.activeScreen ? state[app.activeScreen] : null; }
-  function visible(component) { return !component.screen || component.screen === activeScreen(); }
+  function condition(value) {
+    if (!value) return false;
+    try { return window.AtomOSCondition ? window.AtomOSCondition.evaluate(value, state) : Boolean(state[value]); }
+    catch (error) { console.warn('Invalid AtomOS condition', value, error); return false; }
+  }
+  function visible(component) {
+    if (component.screen && component.screen !== activeScreen()) return false;
+    if (component.visibleWhen && !condition(component.visibleWhen)) return false;
+    if (component.hiddenWhen && condition(component.hiddenWhen)) return false;
+    return true;
+  }
+  function disabled(component) { return Boolean((component.enabledWhen && !condition(component.enabledWhen)) || (component.disabledWhen && condition(component.disabledWhen))); }
 
   function run(event) {
     for (const rule of (app.rules || []).filter(item => item.event === event)) {
@@ -136,7 +147,7 @@
     if (component.type === 'heading') { const e = document.createElement('h2'); e.className = 'full'; e.textContent = component.text || ''; return e; }
     if (component.type === 'text') { const e = document.createElement('p'); e.className = 'full'; e.textContent = component.bind ? String(state[component.bind] ?? '') : component.text || ''; return e; }
     if (component.type === 'display') { const e = document.createElement('div'); e.className = 'display'; e.innerHTML = `<small>${component.label || ''}</small><strong>${String(state[component.bind] ?? component.text ?? '')}</strong>`; return e; }
-    if (component.type === 'button') { const e = document.createElement('button'); e.className = `button ${component.variant || ''}`; e.textContent = component.text || component.label || component.id; e.addEventListener('click', () => run(component.event)); return e; }
+    if (component.type === 'button') { const e = document.createElement('button'); e.className = `button ${component.variant || ''}`; e.textContent = component.text || component.label || component.id; e.disabled = disabled(component); e.addEventListener('click', () => run(component.event)); return e; }
     if (component.type === 'sound') return null;
     const e = document.createElement('div'); e.className = 'full'; return e;
   }
