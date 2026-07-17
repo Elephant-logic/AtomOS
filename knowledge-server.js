@@ -63,9 +63,22 @@ async function handleKnowledge(req, res) {
   }
 }
 
+function injectKnowledgeStudio(req, res) {
+  const pathname = new URL(req.url, 'http://localhost').pathname;
+  if (req.method !== 'GET' || (pathname !== '/' && pathname !== '/index.html')) return;
+  const originalEnd = res.end.bind(res);
+  res.end = function endWithKnowledge(body, encoding, callback) {
+    let output = body;
+    if (typeof body === 'string') output = body.replace('</body>', '<script src="/knowledge-studio.js"></script></body>');
+    else if (Buffer.isBuffer(body)) output = Buffer.from(body.toString('utf8').replace('</body>', '<script src="/knowledge-studio.js"></script></body>'));
+    return originalEnd(output, encoding, callback);
+  };
+}
+
 http.createServer = function patchedCreateServer(handler) {
   return originalCreateServer(async (req, res) => {
     if (await handleKnowledge(req, res)) return;
+    injectKnowledgeStudio(req, res);
     return handler(req, res);
   });
 };
