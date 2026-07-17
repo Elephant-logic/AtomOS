@@ -2,6 +2,11 @@
   'use strict';
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
+  function loadScript(src) {
+    return new Promise((resolve,reject)=>{const existing=document.querySelector(`script[src="${src}"]`);if(existing){if(existing.dataset.ready==='yes')resolve();else existing.addEventListener('load',resolve,{once:true});return;}const script=document.createElement('script');script.src=src;script.onload=()=>{script.dataset.ready='yes';resolve();};script.onerror=reject;document.head.appendChild(script);});
+  }
+  loadScript('/game-engine.js').then(()=>loadScript('/game-engine-studio.js')).catch(error=>console.warn('Game engine unavailable',error));
+
   const style = document.createElement('style');
   style.textContent = `
     .app-component.board{grid-column:1/-1;display:grid;gap:6px}.board-cell{aspect-ratio:1;min-height:56px;font-size:24px;font-weight:800;background:#fff;color:#152238;border:1px solid #cbd7e7;border-radius:9px}
