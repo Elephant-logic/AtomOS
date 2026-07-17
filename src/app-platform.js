@@ -1,0 +1,199 @@
+'use strict';
+
+const { APP_SCHEMA, ACTION_TYPES } = require('./app-schema');
+
+function normalizeEnabledWhen(value) {
+  const text = String(value || '').trim();
+  if (!text) return undefined;
+  for (const pattern of [/^(?:state\.)?([A-Za-z][A-Za-z0-9_-]{0,39})$/, /^\(?\s*(?:state\.)?([A-Za-z][A-Za-z0-9_-]{0,39})\s*(?:===|==|is)\s*true\s*\)?$/i]) {
+    const match = text.match(pattern); if (match) return match[1];
+  }
+  return text;
+}
+
+function normalizeApplication(app) {
+  app.capabilities = Array.isArray(app.capabilities) ? app.capabilities : [];
+  for (const timer of Array.isArray(app.timers) ? app.timers : []) {
+    if (!app.capabilities.some(item => item.id === timer.id)) app.capabilities.push({ ...timer, type: 'interval' });
+  }
+  delete app.timers;
+  for (const capability of app.capabilities) {
+    if (capability.type === 'interval' && capability.enabledWhen) capability.enabledWhen = normalizeEnabledWhen(capability.enabledWhen);
+  }
+  if (Array.isArray(app.screens) && app.screens.length) {
+    if (!app.activeScreen) app.activeScreen = 'activeScreen';
+    if (!app.state || typeof app.state !== 'object') app.state = {};
+    if (app.state[app.activeScreen] === undefined) app.state[app.activeScreen] = app.screens[0];
+  }
+  const buttons = new Map();
+  for (const component of app.components || []) {
+    if (component.type === 'button') {
+      if (!component.event) component.event = `${component.id}.click`;
+      buttons.set(component.id, component);
+    }
+    if (component.type === 'board') {
+      if (!component.event) component.event = `${component.id}.select`;
+      if (!component.indexState) component.indexState = `${component.id}Index`;
+      if (app.state[component.indexState] === undefined) app.state[component.indexState] = 0;
+    }
+    if (component.type === 'repeat' && component.itemEvent) {
+      if (!component.itemIndexState) component.itemIndexState = `${component.id}Index`;
+      if (app.state[component.itemIndexState] === undefined) app.state[component.itemIndexState] = 0;
+    }
+  }
+  const visibleEvents = new Set([...buttons.values()].map(button => button.event));
+  for (const rule of app.rules || []) {
+    if (!visibleEvents.has(rule.event)) {
+      const button = buttons.get(String(rule.event || '').replace(/\.(click|press|tap)$/i, ''));
+      if (button) rule.event = button.event;
+    }
+    for (const action of rule.actions || []) {
+      const source = String(action.from || '').toLowerCase(), target = String(action.target || '').toLowerCase();
+      if (action.op === 'calculate' && /(elapsed|seconds|duration|remaining|time)/.test(source) && /(display|formatted|time)/.test(target)) action.op = 'format_time';
+      if ((action.op === 'increment' || action.op === 'decrement') && action.by !== undefined && action.value === undefined) action.value = action.by;
+    }
+  }
+  return app;
+}
+
+function validateReferences(app) {
+  if (!app || typeof app !== 'object' || Array.isArray(app)) throw new Error('The model returned an invalid application object');
+  if (!app.state || typeof app.state !== 'object' || Array.isArray(app.state)) throw new Error('Application state is missing');
+  if (!Array.isArray(app.components) || !app.components.length) throw new Error('Application components are missing');
+  if (!Array.isArray(app.rules)) throw new Error('Application rules are missing');
+  if (!Array.isArray(app.capabilities)) app.capabilities = [];
+
+  const stateKeys = new Set(Object.keys(app.state));
+  const componentIds = new Set();
+  const capabilityIds = new Set();
+  const entryEvents = new Set();
+  const ruleEvents = new Set();
+  const emittedEvents = new Set();
+  const screens = new Set(Array.isArray(app.screens) ? app.screens : []);
+
+  if (screens.size && !stateKeys.has(app.activeScreen)) throw new Error(`activeScreen state key is missing: ${app.activeScreen}`);
+
+  for (const component of app.components) {
+    if (!component.id || !component.type) throw new Error('Every component needs an id and type');
+    if (componentIds.has(component.id)) throw new Error(`Duplicate component id: ${component.id}`);
+    componentIds.add(component.id);
+    if (component.bind && !stateKeys.has(component.bind)) throw new Error(`Unknown binding: ${component.bind}`);
+    for (const field of ['visibleWhen', 'hiddenWhen', 'enabledWhen', 'disabledWhen', 'indexState', 'itemIndexState']) {
+      if (component[field] && !stateKeys.has(component[field])) throw new Error(`Component ${component.id} references unknown state key: ${component[field]}`);
+    }
+    if (component.screen && !screens.has(component.screen)) throw new Error(`Component ${component.id} references unknown screen: ${component.screen}`);
+    if (component.type === 'board') {
+      if (!component.bind || !Array.isArray(app.state[component.bind])) throw new Error(`Board ${component.id} needs a bind to a list state key`);
+      if (!component.indexState) throw new Error(`Board ${component.id} needs an indexState state key`);
+      if (!Number.isFinite(Number(component.rows)) || !Number.isFinite(Number(component.cols))) throw new Error(`Board ${component.id} needs rows and cols`);
+    }
+    if (component.type === 'repeat') {
+      if (!component.bind || !Array.isArray(app.state[component.bind])) throw new Error(`Repeat ${component.id} needs a bind to a list state key`);
+      if (component.itemEvent && !component.itemIndexState) throw new Error(`Repeat ${component.id} with itemEvent needs itemIndexState`);
+      if (component.itemEvent) entryEvents.add(component.itemEvent);
+    }
+    if (component.type === 'group' && (!Array.isArray(component.children) || !component.children.length)) throw new Error(`Group ${component.id} needs children`);
+    if (component.type === 'image' && (!component.src || !/^(https:\/\/|data:image\/)/i.test(component.src))) throw new Error(`Image ${component.id} needs an https or data:image src`);
+    if (component.type === 'link') {
+      const hasHref = Boolean(component.href), hasScreen = Boolean(component.toScreen);
+      if (hasHref === hasScreen) throw new Error(`Link ${component.id} needs exactly one of href or toScreen`);
+      if (hasScreen && !screens.has(component.toScreen)) throw new Error(`Link ${component.id} references unknown screen: ${component.toScreen}`);
+      if (hasHref && !/^(https?:\/\/|mailto:)/i.test(component.href)) throw new Error(`Link ${component.id} href must be http(s) or mailto`);
+    }
+    if (component.event) entryEvents.add(component.event);
+  }
+
+  for (const component of app.components) {
+    if (component.type !== 'group') continue;
+    for (const child of component.children) {
+      if (!componentIds.has(child)) throw new Error(`Group ${component.id} references unknown child: ${child}`);
+      if (child === component.id) throw new Error(`Group ${component.id} cannot contain itself`);
+    }
+  }
+
+  for (const capability of app.capabilities) {
+    if (!capability.id || !capability.type) throw new Error('Every capability needs id and type');
+    if (capabilityIds.has(capability.id)) throw new Error(`Duplicate capability id: ${capability.id}`);
+    capabilityIds.add(capability.id);
+    if (capability.type === 'interval') {
+      if (!capability.event || !Number.isFinite(Number(capability.everyMs))) throw new Error(`Interval capability ${capability.id} needs event and everyMs`);
+      if (capability.enabledWhen && !stateKeys.has(capability.enabledWhen)) throw new Error(`Unknown interval state key: ${capability.enabledWhen}`);
+      entryEvents.add(capability.event);
+    } else if (capability.type === 'storage') {
+      if (!Array.isArray(capability.stateKeys) || !capability.stateKeys.length) throw new Error(`Storage capability ${capability.id} needs stateKeys`);
+      for (const key of capability.stateKeys) if (!stateKeys.has(key)) throw new Error(`Unknown storage state key: ${key}`);
+    } else if (capability.type === 'startup') {
+      if (!capability.event) throw new Error(`Startup capability ${capability.id} needs event`);
+      entryEvents.add(capability.event);
+    } else if (capability.type === 'keyboard') {
+      if (!capability.event || !capability.keyboardKey) throw new Error(`Keyboard capability ${capability.id} needs event and keyboardKey`);
+      entryEvents.add(capability.event);
+    } else throw new Error(`Unsupported capability type: ${capability.type}`);
+  }
+
+  for (const rule of app.rules) {
+    if (!rule.event || !Array.isArray(rule.actions)) throw new Error('Every rule needs an event and actions');
+    if (ruleEvents.has(rule.event)) throw new Error(`Duplicate rule event: ${rule.event}`);
+    ruleEvents.add(rule.event);
+    for (const action of rule.actions) {
+      if (!stateKeys.has(action.target)) throw new Error(`Unknown action target: ${action.target}`);
+      if (action.from && !stateKeys.has(action.from)) throw new Error(`Unknown action source: ${action.from}`);
+      if (action.indexFrom && !stateKeys.has(action.indexFrom)) throw new Error(`Unknown index source: ${action.indexFrom}`);
+      if (action.when && !stateKeys.has(action.when.state)) throw new Error(`Unknown condition state key: ${action.when.state}`);
+      if (action.op === 'format_time' && !action.from) throw new Error('format_time needs a numeric source state key');
+      if (action.op === 'navigate') {
+        if (!screens.size) throw new Error('navigate needs the application to declare screens');
+        if (action.target !== app.activeScreen) throw new Error(`navigate must target the activeScreen state key: ${app.activeScreen}`);
+        if (!screens.has(action.value)) throw new Error(`navigate value must be a declared screen: ${action.value}`);
+      }
+      if (action.op === 'emit') {
+        if (!action.event) throw new Error('emit needs an event name');
+        emittedEvents.add(action.event);
+      }
+    }
+  }
+  for (const event of emittedEvents) if (!ruleEvents.has(event)) throw new Error(`Emitted event has no matching rule: ${event}`);
+  for (const event of ruleEvents) if (!entryEvents.has(event) && !emittedEvents.has(event)) throw new Error(`Rule cannot be reached from a visible control, capability or emitted event: ${event}`);
+}
+
+function extractOutputText(response) {
+  if (typeof response.output_text === 'string') return response.output_text;
+  for (const item of response.output || []) for (const part of item.content || []) {
+    if (part.type === 'output_text' && typeof part.text === 'string') return part.text;
+  }
+  return '';
+}
+
+async function buildApp(prompt, currentApp) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENAI_API_KEY is not configured on Render');
+  const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
+  const editing = currentApp && typeof currentApp === 'object';
+  const input = editing ? `CURRENT APPLICATION:\n${JSON.stringify(currentApp)}\n\nCHANGE REQUEST:\n${prompt}` : prompt;
+  const instructions = [
+    'You are the AtomOS application architect. Return only one complete application matching the supplied JSON schema.',
+    editing ? 'Revise the current application and preserve unrelated working features and stable ids.' : 'Build one complete small interactive application.',
+    'Every button, board and repeat item event must have a matching rule. Every bind, condition and action target must name a state key.',
+    'Use screens plus activeScreen and navigate for multi-page websites, menus, game scenes and dialogs. Untagged components are shared chrome.',
+    'Use board with rows, cols, list bind and indexState for tile and turn-based games. Use list_set or list_remove with indexFrom.',
+    'Use group with child ids and row, column, grid or stack layout instead of inventing special layout components.',
+    'Use repeat for lists, galleries, shops, inventories, cards and scoreboards. Bind it to a list; itemEvent and itemIndexState make items interactive.',
+    'Use visibleWhen, hiddenWhen, enabledWhen and disabledWhen for declarative UI state.',
+    'Images require https or data:image sources. Links require either a safe external href or a declared toScreen target.',
+    'Use interval, storage, startup and keyboard capabilities. Make the result responsive and mobile friendly.'
+  ].join(' ');
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ model, instructions, input, text: { format: { type: 'json_schema', name: 'atomos_application', strict: false, schema: APP_SCHEMA } } })
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload?.error?.message || `OpenAI request failed (${response.status})`);
+  const text = extractOutputText(payload);
+  if (!text) throw new Error('The model returned no application');
+  const app = normalizeApplication(JSON.parse(text));
+  validateReferences(app);
+  return { app, model, responseId: payload.id, mode: editing ? 'edit' : 'build', capabilities: app.capabilities.map(({ id, type }) => ({ id, type })) };
+}
+
+module.exports = { normalizeApplication, validateReferences, buildApp, APP_SCHEMA, ACTION_TYPES };
