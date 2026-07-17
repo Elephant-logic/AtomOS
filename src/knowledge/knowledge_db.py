@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS usage (
  failed_builds INTEGER NOT NULL DEFAULT 0, last_used_at TEXT,
  FOREIGN KEY(atom_id) REFERENCES atoms(id) ON DELETE CASCADE
 );
-CREATE VIRTUAL TABLE IF NOT EXISTS atom_search USING fts5(id UNINDEXED, name, kind, description, tags, content='');
+CREATE VIRTUAL TABLE IF NOT EXISTS atom_search USING fts5(id UNINDEXED, name, kind, description, tags);
 '''
 
 def now(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
