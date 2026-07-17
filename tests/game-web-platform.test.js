@@ -73,3 +73,21 @@ test('unsafe images and invalid links are rejected', () => {
     components: [{ id: 'link', type: 'link', href: 'https://example.com', toScreen: 'home' }], rules: []
   }), /exactly one/);
 });
+
+test('component conditions accept comparisons, boolean logic and bare string literals', () => {
+  const app = prepare({
+    title: 'Conditions', description: '',
+    state: { activeScreen: 'menu', score: 12, paused: false, ready: true, connected: true },
+    components: [
+      { id: 'menu_instructions', type: 'text', text: 'Instructions', visibleWhen: 'activeScreen==menu' },
+      { id: 'score', type: 'text', text: 'Winner', visibleWhen: 'score >= 10 && !paused' },
+      { id: 'play', type: 'button', label: 'Play', event: 'play', enabledWhen: 'ready && connected' }
+    ],
+    rules: [{ event: 'play', actions: [{ op: 'set', target: 'paused', value: false }] }]
+  });
+  assert.equal(app.components[0].visibleWhen, 'activeScreen==menu');
+  assert.throws(() => prepare({
+    title: 'Bad condition', description: '', state: { activeScreen: 'menu' },
+    components: [{ id: 'bad', type: 'text', text: 'Bad', visibleWhen: 'missing == menu' }], rules: []
+  }), /unknown state key: missing/);
+});
