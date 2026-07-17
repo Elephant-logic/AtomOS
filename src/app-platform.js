@@ -88,6 +88,15 @@ function normalizeApplication(app) {
       const source = String(action.from || '').toLowerCase(), target = String(action.target || '').toLowerCase();
       if (action.op === 'calculate' && /(elapsed|seconds|duration|remaining|time)/.test(source) && /(display|formatted|time)/.test(target)) action.op = 'format_time';
       if ((action.op === 'increment' || action.op === 'decrement') && action.by !== undefined && action.value === undefined) action.value = action.by;
+      if (action.op === 'navigate' && Array.isArray(app.screens) && app.screens.length) {
+        const screens = new Set(app.screens);
+        if (screens.has(action.target) && action.value === undefined) {
+          action.value = action.target;
+          action.target = app.activeScreen;
+        } else if (action.target !== app.activeScreen && screens.has(action.value)) {
+          action.target = app.activeScreen;
+        }
+      }
     }
   }
   return app;
