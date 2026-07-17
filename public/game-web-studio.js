@@ -16,13 +16,18 @@
   `;
   document.head.appendChild(style);
 
+  function condition(value) {
+    if (!value) return false;
+    try { return window.AtomOSCondition ? window.AtomOSCondition.evaluate(value, state) : Boolean(state[value]); }
+    catch (error) { console.warn('Invalid AtomOS condition', value, error); return false; }
+  }
   function visible(component) {
-    if (component.visibleWhen && !state[component.visibleWhen]) return false;
-    if (component.hiddenWhen && state[component.hiddenWhen]) return false;
+    if (component.visibleWhen && !condition(component.visibleWhen)) return false;
+    if (component.hiddenWhen && condition(component.hiddenWhen)) return false;
     return true;
   }
   function disabled(component) {
-    return Boolean((component.enabledWhen && !state[component.enabledWhen]) || (component.disabledWhen && state[component.disabledWhen]));
+    return Boolean((component.enabledWhen && !condition(component.enabledWhen)) || (component.disabledWhen && condition(component.disabledWhen)));
   }
   function itemLabel(component, item, index) {
     if (item && typeof item === 'object') return String(item[component.itemLabelField || 'label'] ?? item.name ?? item.title ?? index + 1);
