@@ -1,0 +1,57 @@
+{
+  "title": "Atom Runner",
+  "description": "A declarative sprite, physics, camera and tile-map example.",
+  "state": {
+    "entities": [
+      {
+        "id": "player",
+        "label": "◆",
+        "x": 32,
+        "y": 32,
+        "width": 28,
+        "height": 28,
+        "vx": 0,
+        "vy": 0,
+        "speed": 150,
+        "jumpSpeed": 330,
+        "friction": 0.08,
+        "controls": {
+          "left": "ArrowLeft",
+          "right": "ArrowRight",
+          "jump": " "
+        }
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "game",
+      "type": "scene",
+      "bind": "entities",
+      "width": 640,
+      "height": 360,
+      "world": {
+        "gravity": 700,
+        "camera": {
+          "follow": "player",
+          "zoom": 1
+        },
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 960,
+          "height": 480
+        },
+        "map": {
+          "cols": 10,
+          "rows": 5,
+          "tileWidth": 32,
+          "tileHeight": 32,
+          "tiles": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1],
+          "solidTiles": [1]
+        }
+      }
+    }
+  ],
+  "rules": []
+}
