@@ -1,6 +1,7 @@
 'use strict';
 
 const { APP_SCHEMA, ACTION_TYPES } = require('./app-schema');
+const Condition = require('../public/condition-expression');
 
 function parseEnabledWhen(value) {
   const text = String(value || '').trim();
@@ -107,7 +108,13 @@ function validateReferences(app) {
     if (componentIds.has(component.id)) throw new Error(`Duplicate component id: ${component.id}`);
     componentIds.add(component.id);
     if (component.bind && !stateKeys.has(component.bind)) throw new Error(`Unknown binding: ${component.bind}`);
-    for (const field of ['visibleWhen','hiddenWhen','enabledWhen','disabledWhen','indexState','itemIndexState']) if (component[field] && !stateKeys.has(component[field])) throw new Error(`Component ${component.id} references unknown state key: ${component[field]}`);
+    for (const field of ['visibleWhen','hiddenWhen','enabledWhen','disabledWhen']) if (component[field]) {
+      let referenced;
+      try { referenced = Condition.extractStateKeys(component[field]); }
+      catch (error) { throw new Error(`Component ${component.id} has invalid ${field} condition: ${error.message}`); }
+      for (const key of referenced) if (!stateKeys.has(key)) throw new Error(`Component ${component.id} references unknown state key: ${key}`);
+    }
+    for (const field of ['indexState','itemIndexState']) if (component[field] && !stateKeys.has(component[field])) throw new Error(`Component ${component.id} references unknown state key: ${component[field]}`);
     if (component.screen && !screens.has(component.screen)) throw new Error(`Component ${component.id} references unknown screen: ${component.screen}`);
     if (component.type === 'board') {
       if (!component.bind || !Array.isArray(app.state[component.bind])) throw new Error(`Board ${component.id} needs a bind to a list state key`);
@@ -193,7 +200,7 @@ async function buildApp(prompt, currentApp) {
     'Use board with rows, cols, list bind and indexState for tile and turn-based games. Use list_set or list_remove with indexFrom.',
     'Use group with child ids and row, column, grid or stack layout instead of inventing special layout components.',
     'Use repeat for lists, galleries, shops, inventories, cards and scoreboards. Bind it to a list; itemEvent and itemIndexState make items interactive.',
-    'Use visibleWhen, hiddenWhen, enabledWhen and disabledWhen for declarative UI state.',
+    'Use visibleWhen, hiddenWhen, enabledWhen and disabledWhen for declarative UI conditions. They accept state keys or expressions such as activeScreen == "menu", score >= 10, !paused, ready && connected. Quote string values when possible; bare comparison values are treated as strings.',
     'Images require https or data:image sources. Links require either a safe external href or a declared toScreen target.',
     'Use interval, storage, startup and keyboard capabilities. Make the result responsive and mobile friendly.'
   ].join(' ');
