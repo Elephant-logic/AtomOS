@@ -50,7 +50,7 @@
     return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#173b2a"><link rel="manifest" href="manifest.webmanifest"><title>${String(app.title || 'AtomOS App').replace(/[<>&]/g,'')}</title>
 <style>*{box-sizing:border-box}body{font:16px/1.45 system-ui,sans-serif;background:#09150f;color:#eefbf3;margin:0;padding:14px;min-height:100vh}.app{max-width:980px;margin:auto;background:#10231a;border:1px solid #294737;border-radius:18px;padding:18px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.full{grid-column:1/-1}.display{display:flex;flex-direction:column;background:#0a1811;border:1px solid #315442;border-radius:12px;padding:10px;min-height:60px}.display small{opacity:.72}.display strong{font-size:24px}.button{padding:13px;border:0;border-radius:10px;background:#2d8f58;color:white;font-weight:750;min-height:48px}.secondary{background:#526b5d}.danger{background:#ad3f4c}.scene-wrap{position:relative;overflow:hidden;border-radius:14px;border:1px solid #41624f;background:#07110b}.game-canvas{display:block;width:100%;height:360px;touch-action:none}.touch-controls{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}.touch-controls button{font-size:22px;min-height:56px}@media(max-width:600px){body{padding:6px}.app{padding:10px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.game-canvas{height:300px}}@media(display-mode:standalone){body{padding-top:max(8px,env(safe-area-inset-top))}}</style></head>
-<body><div id="root"></div><script>window.ATOMOS_APP=${data};</script><script src="./export-runtime.js"></script><script>if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.error));</script></body></html>`;
+<body><div id="root"></div><script>window.ATOMOS_APP=${data};</script><script src="./condition-expression.js"></script><script src="./export-runtime.js"></script><script>if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.error));</script></body></html>`;
   }
   function manifest(app) {
     const name = String(app.title || 'AtomOS App');
@@ -61,19 +61,23 @@
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#173b2a"/><circle cx="256" cy="256" r="142" fill="#fff" opacity=".12"/><text x="256" y="292" text-anchor="middle" font-family="system-ui,sans-serif" font-size="150" font-weight="800" fill="white">${initials.replace(/[<>&]/g,'')}</text></svg>`;
   }
   function serviceWorker() {
-    return `const CACHE='atomos-app-v2';const FILES=['./','./index.html','./export-runtime.js','./manifest.webmanifest','./icon.svg'];self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting())));self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(caches.match(e.request).then(hit=>hit||fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy));return r}).catch(()=>caches.match('./index.html'))))});`;
+    return `const CACHE='atomos-app-v2';const FILES=['./','./index.html','./condition-expression.js','./export-runtime.js','./manifest.webmanifest','./icon.svg'];self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting())));self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(caches.match(e.request).then(hit=>hit||fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy));return r}).catch(()=>caches.match('./index.html'))))});`;
   }
   function pwaReadme(app) { return `# ${app.title || 'AtomOS App'}\n\nThis AtomOS export includes the playable application runtime.\n\n## Deploy\n\nUpload every file in this ZIP to one HTTPS folder. The package includes the game renderer, keyboard/mobile input, physics loop and offline service worker.\n`; }
-  async function runtimeSource() {
-    const response = await fetch('/export-runtime.js', { cache:'no-store' });
-    if (!response.ok) throw new Error(`Could not load export runtime (${response.status})`);
-    return response.text();
+  async function runtimeSources() {
+    const [conditionResponse, runtimeResponse] = await Promise.all([
+      fetch('/condition-expression.js', { cache:'no-store' }),
+      fetch('/export-runtime.js', { cache:'no-store' })
+    ]);
+    if (!conditionResponse.ok) throw new Error(`Could not load condition runtime (${conditionResponse.status})`);
+    if (!runtimeResponse.ok) throw new Error(`Could not load export runtime (${runtimeResponse.status})`);
+    return { conditionRuntime: await conditionResponse.text(), runtime: await runtimeResponse.text() };
   }
   async function downloadPwa(app) {
     const name = typeof slug === 'function' ? slug(app.title) : 'atomos-app';
-    const runtime = await runtimeSource();
+    const { conditionRuntime, runtime } = await runtimeSources();
     const blob = zipStore([
-      {name:'index.html',data:appHtml(app)}, {name:'export-runtime.js',data:runtime}, {name:'manifest.webmanifest',data:manifest(app)},
+      {name:'index.html',data:appHtml(app)}, {name:'condition-expression.js',data:conditionRuntime}, {name:'export-runtime.js',data:runtime}, {name:'manifest.webmanifest',data:manifest(app)},
       {name:'sw.js',data:serviceWorker()}, {name:'icon.svg',data:iconSvg(app)}, {name:'README.md',data:pwaReadme(app)}
     ]);
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${name}-pwa.zip`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
