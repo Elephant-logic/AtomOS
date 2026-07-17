@@ -4,6 +4,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { buildCodeApp, scanPython } = require('./src/code-builder');
+const knowledge = require('./src/knowledge/service');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -105,6 +106,13 @@ function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
     req.on('data', chunk => { data += chunk; if (data.length > MAX_BODY) reject(new Error('Request too large')); });
+    req.on('end', () => resolve(data)); req.on('error', reject);
+  });
+}
+function readLargeBody(req, max = 5_000_000) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', chunk => { data += chunk; if (data.length > max) reject(new Error('Knowledge import is too large')); });
     req.on('end', () => resolve(data)); req.on('error', reject);
   });
 }
@@ -227,18 +235,49 @@ function serveStatic(req, res) {
     if (error) return send(res, 404, 'Not found', 'text/plain');
     const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
     if (rel === 'index.html') {
-      const html = data.toString('utf8').replace('</body>', '<script src="/pwa-export.js"></script><script src="/capability-runtime.js"></script><script src="/codem8s-studio.js"></script></body>');
+      const html = data.toString('utf8').replace('</body>', '<script src="/pwa-export.js"></script><script src="/capability-runtime.js"></script><script src="/codem8s-studio.js"></script><script src="/knowledge-studio.js"></script></body>');
       return send(res, 200, html, 'text/html; charset=utf-8');
     }
     send(res, 200, data, types[path.extname(filePath)] || 'application/octet-stream');
   });
 }
 const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://localhost');
   if (req.method === 'GET' && req.url === '/api/status') return send(res, 200, {
     ready: Boolean(process.env.OPENAI_API_KEY), model: process.env.OPENAI_MODEL || 'gpt-5-mini',
     capabilityTypes: ['interval', 'storage', 'startup', 'keyboard'], actionTypes: ACTION_TYPES,
     conditionalActions: true, internalEvents: true, listState: true, codeBuilder: { languages: ['python'], execution: false, verification: ['blocked-pattern scan', 'python syntax compile', 'repair loop'] }
   });
+  if (req.method === 'GET' && url.pathname === '/api/knowledge/stats') {
+    try { return send(res, 200, await knowledge.stats()); }
+    catch (error) { return send(res, 500, { error: error.message || 'Knowledge database failed' }); }
+  }
+  if (req.method === 'GET' && url.pathname === '/api/knowledge/search') {
+    try { return send(res, 200, await knowledge.search(url.searchParams.get('q') || '', Number(url.searchParams.get('limit') || 30))); }
+    catch (error) { return send(res, 500, { error: error.message || 'Knowledge search failed' }); }
+  }
+  if (req.method === 'GET' && url.pathname.startsWith('/api/knowledge/atoms/')) {
+    try {
+      const id = decodeURIComponent(url.pathname.slice('/api/knowledge/atoms/'.length));
+      const result = await knowledge.get(id); return send(res, result.atom ? 200 : 404, result);
+    } catch (error) { return send(res, 500, { error: error.message || 'Knowledge lookup failed' }); }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/knowledge/import') {
+    try { return send(res, 200, await knowledge.importAtoms(JSON.parse(await readLargeBody(req) || '{}'))); }
+    catch (error) { return send(res, 500, { error: error.message || 'Knowledge import failed' }); }
+  }
+  if (req.method === 'POST' && /\/api\/knowledge\/atoms\/[^/]+\/status$/.test(url.pathname)) {
+    try {
+      const id = decodeURIComponent(url.pathname.split('/').slice(-2)[0]);
+      const body = JSON.parse(await readBody(req) || '{}'); return send(res, 200, await knowledge.setStatus(id, body.status));
+    } catch (error) { return send(res, 500, { error: error.message || 'Knowledge review failed' }); }
+  }
+  if (req.method === 'POST' && /\/api\/knowledge\/atoms\/[^/]+\/usage$/.test(url.pathname)) {
+    try {
+      const id = decodeURIComponent(url.pathname.split('/').slice(-2)[0]);
+      const body = JSON.parse(await readBody(req) || '{}'); return send(res, 200, await knowledge.recordUsage(id, Boolean(body.success)));
+    } catch (error) { return send(res, 500, { error: error.message || 'Knowledge usage update failed' }); }
+  }
   if (req.method === 'POST' && req.url === '/api/build') {
     try {
       const body = JSON.parse(await readBody(req) || '{}'), prompt = String(body.prompt || '').trim();
@@ -264,4 +303,5 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET') return serveStatic(req, res);
   send(res, 405, { error: 'Method not allowed' });
 });
+knowledge.init().then(result => console.log(`AtomOS knowledge database ready: ${result.database}`)).catch(error => console.error('Knowledge database unavailable:', error));
 server.listen(PORT, '0.0.0.0', () => console.log(`AtomOS listening on ${PORT}`));
