@@ -4,9 +4,9 @@
   "description": "Deterministic Atomic runtime with persistent code knowledge and secure AI builds",
   "license": "MIT",
   "type": "commonjs",
-  "main": "knowledge-server.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node knowledge-server.js",
+    "start": "node server.js",
     "test": "node --test tests/*.test.js",
     "compile:molecule": "node tools/compile-molecule.js"
   },
