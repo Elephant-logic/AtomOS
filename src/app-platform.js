@@ -2,13 +2,23 @@
 
 const { APP_SCHEMA, ACTION_TYPES } = require('./app-schema');
 
-function normalizeEnabledWhen(value) {
+function parseEnabledWhen(value) {
   const text = String(value || '').trim();
-  if (!text) return undefined;
-  for (const pattern of [/^(?:state\.)?([A-Za-z][A-Za-z0-9_-]{0,39})$/, /^\(?\s*(?:state\.)?([A-Za-z][A-Za-z0-9_-]{0,39})\s*(?:===|==|is)\s*true\s*\)?$/i]) {
-    const match = text.match(pattern); if (match) return match[1];
+  if (!text) return [];
+  const direct = text.match(/^(?:state\.)?([A-Za-z][A-Za-z0-9_-]{0,39})$/);
+  if (direct) return [direct[1]];
+  const truthy = text.match(/^\(?\s*(?:state\.)?([A-Za-z][A-Za-z0-9_-]{0,39})\s*(?:===|==|is)\s*true\s*\)?$/i);
+  if (truthy) return [truthy[1]];
+  if (/&&|\band\b/i.test(text)) throw new Error(`Interval enabledWhen cannot use AND expressions: ${text}`);
+  const parts = text.split(/\s*(?:\|\||\bor\b)\s*/i).map(part => part.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    const keys = parts.map(part => {
+      const match = part.match(/^\(?\s*(?:state\.)?([A-Za-z][A-Za-z0-9_-]{0,39})(?:\s*(?:===|==|is)\s*true)?\s*\)?$/i);
+      return match && match[1];
+    });
+    if (keys.every(Boolean)) return [...new Set(keys)];
   }
-  return text;
+  throw new Error(`Interval enabledWhen must be one state key or an OR of state keys: ${text}`);
 }
 
 function normalizeApplication(app) {
@@ -17,9 +27,24 @@ function normalizeApplication(app) {
     if (!app.capabilities.some(item => item.id === timer.id)) app.capabilities.push({ ...timer, type: 'interval' });
   }
   delete app.timers;
+  const expandedCapabilities = [];
   for (const capability of app.capabilities) {
-    if (capability.type === 'interval' && capability.enabledWhen) capability.enabledWhen = normalizeEnabledWhen(capability.enabledWhen);
+    if (capability.type !== 'interval' || !capability.enabledWhen) {
+      expandedCapabilities.push(capability);
+      continue;
+    }
+    const keys = parseEnabledWhen(capability.enabledWhen);
+    if (keys.length <= 1) {
+      expandedCapabilities.push({ ...capability, enabledWhen: keys[0] });
+      continue;
+    }
+    keys.forEach((key, index) => {
+      const suffix = `_${index + 1}`;
+      const base = String(capability.id || 'interval').slice(0, Math.max(1, 40 - suffix.length));
+      expandedCapabilities.push({ ...capability, id: `${base}${suffix}`, enabledWhen: key });
+    });
   }
+  app.capabilities = expandedCapabilities;
   if (Array.isArray(app.screens) && app.screens.length) {
     if (!app.activeScreen) app.activeScreen = 'activeScreen';
     if (!app.state || typeof app.state !== 'object') app.state = {};
@@ -174,6 +199,7 @@ async function buildApp(prompt, currentApp) {
     'You are the AtomOS application architect. Return only one complete application matching the supplied JSON schema.',
     editing ? 'Revise the current application and preserve unrelated working features and stable ids.' : 'Build one complete small interactive application.',
     'Every button, board and repeat item event must have a matching rule. Every bind, condition and action target must name a state key.',
+    'Interval enabledWhen accepts exactly one state key. Do not write JavaScript expressions such as a || b or a && b; create separate interval capabilities when different state keys should enable the same event.',
     'Use screens plus activeScreen and navigate for multi-page websites, menus, game scenes and dialogs. Untagged components are shared chrome.',
     'Use board with rows, cols, list bind and indexState for tile and turn-based games. Use list_set or list_remove with indexFrom.',
     'Use group with child ids and row, column, grid or stack layout instead of inventing special layout components.',
@@ -196,4 +222,4 @@ async function buildApp(prompt, currentApp) {
   return { app, model, responseId: payload.id, mode: editing ? 'edit' : 'build', capabilities: app.capabilities.map(({ id, type }) => ({ id, type })) };
 }
 
-module.exports = { normalizeApplication, validateReferences, buildApp, APP_SCHEMA, ACTION_TYPES };
+module.exports = { normalizeApplication, validateReferences, buildApp, APP_SCHEMA, ACTION_TYPES, parseEnabledWhen };
