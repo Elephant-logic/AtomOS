@@ -8,6 +8,7 @@ const knowledge = require('./src/knowledge/service');
 const { normalizeApplication, validateReferences, buildApp, APP_SCHEMA, ACTION_TYPES } = require('./src/app-platform');
 const { classifyBuildIntent, applyIntentGuard } = require('./src/build-intent');
 const { compileCapabilityPlan, planInstructions } = require('./src/capability-compiler');
+const { matchBuiltinApp } = require('./src/builtin-apps');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -19,6 +20,14 @@ async function knowledgeRoute(req,res,url){if(!url.pathname.startsWith('/api/kno
 
 async function compileAndBuild(prompt,currentApp,intent){
   const plan=compileCapabilityPlan(prompt);
+  if(!currentApp){
+    const builtin=matchBuiltinApp(prompt);
+    if(builtin){
+      const app=normalizeApplication(builtin.app);
+      validateReferences(app);
+      return {app,model:'builtin',responseId:null,mode:'build',capabilities:[],builtin:builtin.id,plan};
+    }
+  }
   const guarded=`BUILD PROFILE: ${intent.intent}. ${intent.instructions}\n${planInstructions(plan)}\n\nUSER REQUEST:\n${prompt}`;
   let result;
   try { result=await buildApp(guarded,currentApp); }
