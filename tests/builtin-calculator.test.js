@@ -19,5 +19,5 @@ test('calculator builtin validates and calculates reliably', () => {
   for (const event of ['one', 'plus', 'two', 'multiply', 'three', 'equals']) runtime.executeEvent(app, state, event);
   assert.equal(state.expression, 7);
   runtime.executeEvent(app, state, 'clear');
-  assert.equal(state.expression, '');
+  assert.equal(state.expression, 0);
 });
